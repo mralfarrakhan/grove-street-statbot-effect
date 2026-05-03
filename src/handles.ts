@@ -18,7 +18,11 @@ export const getPlayers = D1Client.D1Client.pipe(
   Effect.flatMap(Schema.decode(Schema.Array(Player))),
   Effect.flatMap((players) =>
     HttpServerResponse.json({
-      players,
+      players: players
+        .toSorted((a, b) =>
+          a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
+        )
+        .map(({ name, tag }) => `${name}#${tag}`),
     }),
   ),
 );
