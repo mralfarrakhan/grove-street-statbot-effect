@@ -1,18 +1,33 @@
-/**
- * Welcome to Cloudflare Workers! This is your first worker.
- *
- * - Run `npm run dev` in your terminal to start a development server
- * - Open a browser tab at http://localhost:8787/ to see your worker in action
- * - Run `npm run deploy` to publish your worker
- *
- * Bind resources to your worker in `wrangler.jsonc`. After adding bindings, a type definition for the
- * `Env` object can be regenerated with `npm run cf-typegen`.
- *
- * Learn more at https://developers.cloudflare.com/workers/
- */
+import {
+  FetchHttpClient,
+  HttpApp,
+  HttpRouter,
+  HttpServerResponse,
+} from '@effect/platform';
+import { Effect } from 'effect';
+import { D1Live } from './services';
+import { basicAuth } from './middlewares';
+import { getPlayers, insertPlayer } from './handles';
+
+const playerRoute = HttpRouter.empty.pipe(
+  HttpRouter.put('/', insertPlayer.pipe(basicAuth)),
+  HttpRouter.get('/', getPlayers),
+);
+
+const servo = HttpRouter.empty.pipe(
+  HttpRouter.mount('/players', playerRoute),
+  HttpRouter.get('/', HttpServerResponse.text('ok')),
+  Effect.catchTags({
+    RouteNotFound: () => HttpServerResponse.text('Not Found', { status: 404 }),
+  }),
+  Effect.catchAllCause((cause) =>
+    HttpServerResponse.json({ message: cause.toJSON() }, { status: 500 }),
+  ),
+  Effect.provide(D1Live),
+  Effect.provide(FetchHttpClient.layer),
+  HttpApp.toWebHandler,
+);
 
 export default {
-	async fetch(request, env, ctx): Promise<Response> {
-		return new Response("Hello World!");
-	},
+  fetch: (request, env, ctx) => servo(request),
 } satisfies ExportedHandler<Env>;
