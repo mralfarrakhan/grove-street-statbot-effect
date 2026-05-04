@@ -7,7 +7,12 @@ import {
 import { Effect } from 'effect';
 import { D1Live } from './services';
 import { makeBasicAuth } from './middlewares';
-import { getPlayers, insertPlayer, removePlayer } from './handles';
+import {
+  getPlayers,
+  insertPlayer,
+  removePlayer,
+  scheduled as runScheduled,
+} from './handles';
 import { env } from 'cloudflare:workers';
 
 const playerRoute = HttpRouter.empty.pipe(
@@ -31,6 +36,14 @@ const servo = HttpRouter.empty.pipe(
   HttpApp.toWebHandler,
 );
 
+const scheduled = runScheduled.pipe(
+  Effect.provide(D1Live),
+  Effect.provide(FetchHttpClient.layer),
+);
+
 export default {
   fetch: (request, env, ctx) => servo(request),
+  scheduled: async (controller, env, ctx) => {
+    ctx.waitUntil(Effect.runPromise(scheduled));
+  },
 } satisfies ExportedHandler<Env>;

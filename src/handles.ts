@@ -1,6 +1,6 @@
 import { D1Client } from '@effect/sql-d1';
 import { Effect, Schema } from 'effect';
-import { PlayerNameTag, Player, Account, PlayerPuuid } from './schemas';
+import { PlayerNameTag, Player, Account, PlayerPuuid, MMRHistory } from './schemas';
 import {
   HttpClient,
   HttpClientRequest,
@@ -10,10 +10,13 @@ import {
 } from '@effect/platform';
 import { env } from 'cloudflare:workers';
 
-export const getPlayers = D1Client.D1Client.pipe(
+const dbGetPlayers = D1Client.D1Client.pipe(
   Effect.flatMap(
     (v) => v<Player>`SELECT puuid, name, tag FROM players ORDER BY name DESC`,
   ),
+);
+
+export const getPlayers = dbGetPlayers.pipe(
   Effect.flatMap(Schema.decode(Schema.Array(Player))),
   Effect.flatMap((players) =>
     HttpServerResponse.json({
@@ -43,13 +46,13 @@ const makeFetchAccount = (name: string, tag: string) =>
     ),
   );
 
-const makeDbInsertPlayer = (puuid: string, name: string, tag: string) =>
+const makeDbInsertPlayer = (player: Player) =>
   D1Client.D1Client.pipe(
     Effect.flatMap(
       (s) =>
         s`INSERT INTO players
             (puuid, name, tag) 
-            values (${s(puuid)}, ${s(name)}, ${s(tag)}) 
+            values (${s(player.puuid)}, ${s(player.name)}, ${s(player.tag)}) 
             ON CONFLICT(puuid) DO UPDATE SET name = excluded.name, tag = excluded.tag`,
     ),
   );
@@ -57,7 +60,9 @@ const makeDbInsertPlayer = (puuid: string, name: string, tag: string) =>
 export const insertPlayer = HttpServerRequest.schemaBodyJson(PlayerNameTag).pipe(
   Effect.flatMap((v) =>
     makeFetchAccount(v.name, v.tag).pipe(
-      Effect.flatMap((account) => makeDbInsertPlayer(account.data.puuid, v.name, v.tag)),
+      Effect.flatMap((account) =>
+        makeDbInsertPlayer({ puuid: account.data.puuid, name: v.name, tag: v.tag }),
+      ),
     ),
   ),
   Effect.map(() => HttpServerResponse.empty({ status: 201 })),
@@ -77,4 +82,21 @@ export const removePlayer = HttpServerRequest.schemaSearchParams(PlayerPuuid).pi
   Effect.catchTags({
     ParseError: (c) => HttpServerResponse.json({ message: c.message }, { status: 400 }),
   }),
+);
+
+const makeFetchMMRHistory = (player: Player) =>
+  HttpClient.HttpClient.pipe(
+    Effect.flatMap((c) =>
+      HttpClientRequest.get(
+        `https://api.henrikdev.xyz/valorant/v1/mmr-history/ap/${player.name}/${player.tag}`,
+      ).pipe(
+        HttpClientRequest.setHeaders({ Authorization: env.VALAPIKEY, Accept: '*/*' }),
+        c.execute,
+        Effect.flatMap(HttpClientResponse.schemaBodyJson(MMRHistory)),
+      ),
+    ),
+  );
+
+export const scheduled = dbGetPlayers.pipe(
+  Effect.flatMap((v) => Effect.forEach(v, (z) => makeFetchMMRHistory(z))),
 );
