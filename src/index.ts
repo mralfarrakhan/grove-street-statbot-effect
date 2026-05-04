@@ -6,11 +6,14 @@ import {
 } from '@effect/platform';
 import { Effect } from 'effect';
 import { D1Live } from './services';
-import { basicAuth } from './middlewares';
-import { getPlayers, insertPlayer } from './handles';
+import { makeBasicAuth } from './middlewares';
+import { getPlayers, insertPlayer, removePlayer } from './handles';
+import { env } from 'cloudflare:workers';
 
 const playerRoute = HttpRouter.empty.pipe(
-  HttpRouter.put('/', insertPlayer.pipe(basicAuth)),
+  HttpRouter.put('/', insertPlayer),
+  HttpRouter.del('/', removePlayer),
+  HttpRouter.use(makeBasicAuth(env.ADMIN_USERNAME, env.ADMIN_PASSWORD)),
   HttpRouter.get('/', getPlayers),
 );
 

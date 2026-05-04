@@ -7,6 +7,7 @@ export class Player extends Schema.Class<Player>('Player')({
 }) {}
 
 export const PlayerNameTag = Schema.Struct(Struct.omit(Player.fields, 'puuid'));
+export const PlayerPuuid = Schema.Struct(Struct.omit(Player.fields, 'name', 'tag'));
 
 export class Errors extends Schema.Class<Errors>('Errors')({
   message: Schema.String,

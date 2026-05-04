@@ -1,6 +1,6 @@
 import { D1Client } from '@effect/sql-d1';
 import { Effect, Schema } from 'effect';
-import { PlayerNameTag, Player, Account } from './schemas';
+import { PlayerNameTag, Player, Account, PlayerPuuid } from './schemas';
 import {
   HttpClient,
   HttpClientRequest,
@@ -8,7 +8,6 @@ import {
   HttpServerRequest,
   HttpServerResponse,
 } from '@effect/platform';
-import { SqlResolver } from '@effect/sql';
 import { env } from 'cloudflare:workers';
 
 export const getPlayers = D1Client.D1Client.pipe(
@@ -18,11 +17,7 @@ export const getPlayers = D1Client.D1Client.pipe(
   Effect.flatMap(Schema.decode(Schema.Array(Player))),
   Effect.flatMap((players) =>
     HttpServerResponse.json({
-      players: players
-        .toSorted((a, b) =>
-          a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
-        )
-        .map(({ name, tag }) => `${name}#${tag}`),
+      players,
     }),
   ),
 );
@@ -48,33 +43,38 @@ const makeFetchAccount = (name: string, tag: string) =>
     ),
   );
 
-const dbInsertPlayer = D1Client.D1Client.pipe(
-  Effect.flatMap((v) =>
-    SqlResolver.void('insertPlayer', {
-      Request: Player,
-      execute: (request) =>
-        v`INSERT INTO players ${v.insert(request)} ON CONFLICT(puuid) DO UPDATE SET name = excluded.name, tag = excluded.tag`,
-    }),
-  ),
-);
+const makeDbInsertPlayer = (puuid: string, name: string, tag: string) =>
+  D1Client.D1Client.pipe(
+    Effect.flatMap(
+      (s) =>
+        s`INSERT INTO players
+            (puuid, name, tag) 
+            values (${s(puuid)}, ${s(name)}, ${s(tag)}) 
+            ON CONFLICT(puuid) DO UPDATE SET name = excluded.name, tag = excluded.tag`,
+    ),
+  );
 
 export const insertPlayer = HttpServerRequest.schemaBodyJson(PlayerNameTag).pipe(
   Effect.flatMap((v) =>
     makeFetchAccount(v.name, v.tag).pipe(
-      Effect.flatMap((account) =>
-        dbInsertPlayer.pipe(
-          Effect.flatMap((z) =>
-            z.execute({ puuid: account.data.puuid, name: v.name, tag: v.tag }),
-          ),
-        ),
-      ),
+      Effect.flatMap((account) => makeDbInsertPlayer(account.data.puuid, v.name, v.tag)),
     ),
   ),
   Effect.map(() => HttpServerResponse.empty({ status: 201 })),
   Effect.catchTags({
     RequestError: (c) => HttpServerResponse.json({ message: c.message }, { status: 400 }),
   }),
-  Effect.catchAllCause((cause) =>
-    HttpServerResponse.json({ message: cause.toString() }, { status: 500 }),
-  ),
+);
+
+const makeDbRemovePlayer = (puuid: string) =>
+  D1Client.D1Client.pipe(
+    Effect.flatMap((s) => s<Schema.Void>`DELETE FROM players WHERE puuid = ${s(puuid)}`),
+  );
+
+export const removePlayer = HttpServerRequest.schemaSearchParams(PlayerPuuid).pipe(
+  Effect.flatMap((v) => makeDbRemovePlayer(v.puuid)),
+  Effect.map(() => HttpServerResponse.empty({ status: 201 })),
+  Effect.catchTags({
+    ParseError: (c) => HttpServerResponse.json({ message: c.message }, { status: 400 }),
+  }),
 );
