@@ -4,10 +4,14 @@ export class Player extends Schema.Class<Player>('Player')({
   name: Schema.String,
   tag: Schema.String,
   puuid: Schema.UUID,
+  discord_tag: Schema.optional(Schema.String),
 }) {}
 
-export const PlayerNameTag = Schema.Struct(Struct.omit(Player.fields, 'puuid'));
-export const PlayerPuuid = Schema.Struct(Struct.omit(Player.fields, 'name', 'tag'));
+export const InsertPlayerSchema = Schema.Struct(
+  Struct.pick(Player.fields, 'name', 'tag', 'discord_tag'),
+);
+
+export const RemovePlayerSchema = Schema.Struct(Struct.pick(Player.fields, 'puuid'));
 
 export class Errors extends Schema.Class<Errors>('Errors')({
   message: Schema.String,
@@ -20,7 +24,7 @@ export class BaseResponse extends Schema.Class<BaseResponse>('BaseResponse')({
   errors: Schema.optional(Errors),
 }) {}
 
-export class Account extends BaseResponse.extend<Account>('Account')({
+export class AccountV2 extends BaseResponse.extend<AccountV2>('Account')({
   data: Schema.Struct({
     puuid: Schema.UUID,
     region: Schema.String,
@@ -62,4 +66,10 @@ export class MMRHistory extends BaseResponse.extend<MMRHistory>('MMRHistory')({
       }),
     ),
   ),
+}) {}
+
+export class MMRHistoryWithPuuid extends MMRHistory.extend<MMRHistoryWithPuuid>(
+  'MMRHistoryWithPuuid',
+)({
+  puuid: Schema.UUID,
 }) {}

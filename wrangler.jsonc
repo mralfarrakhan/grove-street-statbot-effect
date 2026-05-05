@@ -12,13 +12,6 @@
   },
   "upload_source_maps": true,
   "compatibility_flags": ["nodejs_compat"],
-  "d1_databases": [
-    {
-      "binding": "STATBOT_DB",
-      "database_name": "statbot-db",
-      "database_id": "641c555b-0029-42f8-bc72-406a5174855d",
-    },
-  ],
   "triggers": {
     "crons": [
       "*/30 11-16 * * *",
@@ -31,6 +24,13 @@
     {
       "binding": "STATBOT_KV",
       "id": "0219823b0d6e4c04914c3d7f662e670d",
+    },
+  ],
+  "d1_databases": [
+    {
+      "binding": "STATBOT_DB",
+      "database_name": "statbot-db",
+      "database_id": "27d57980-ddf0-4db9-83a8-a6ea7ec4ae81",
     },
   ],
   /**

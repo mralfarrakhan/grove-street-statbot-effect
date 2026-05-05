@@ -11,6 +11,7 @@
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.12.4",
+    "@effect/language-service": "^0.85.1",
     "@types/node": "^25.6.0",
     "typescript": "^5.5.2",
     "vitest": "~3.2.0",

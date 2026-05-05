@@ -5,7 +5,7 @@ import {
   HttpServerResponse,
 } from '@effect/platform';
 import { Effect } from 'effect';
-import { D1Live } from './services';
+import { D1Live, KVLive } from './services';
 import { makeBasicAuth } from './middlewares';
 import {
   getPlayers,
@@ -27,17 +27,17 @@ const servo = HttpRouter.empty.pipe(
   HttpRouter.get('/', HttpServerResponse.text('ok')),
   Effect.catchTags({
     RouteNotFound: () => HttpServerResponse.text('Not Found', { status: 404 }),
+    Unauthorized: () => HttpServerResponse.empty({ status: 404 }),
   }),
   Effect.catchAllCause((cause) =>
     HttpServerResponse.json({ message: cause.toJSON() }, { status: 500 }),
   ),
-  Effect.provide(D1Live),
-  Effect.provide(FetchHttpClient.layer),
+  Effect.provide([D1Live, FetchHttpClient.layer]),
   HttpApp.toWebHandler,
 );
 
 const scheduled = runScheduled.pipe(
-  Effect.provide(D1Live),
+  Effect.provide([D1Live, KVLive]),
   Effect.provide(FetchHttpClient.layer),
 );
 

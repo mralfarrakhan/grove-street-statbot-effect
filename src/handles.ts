@@ -1,6 +1,13 @@
 import { D1Client } from '@effect/sql-d1';
-import { Effect, Schema } from 'effect';
-import { PlayerNameTag, Player, Account, PlayerPuuid, MMRHistory } from './schemas';
+import { Array, Console, Effect, Option, Order, Schema } from 'effect';
+import {
+  Player,
+  AccountV2,
+  MMRHistory,
+  MMRHistoryWithPuuid,
+  InsertPlayerSchema,
+  RemovePlayerSchema,
+} from './schemas';
 import {
   HttpClient,
   HttpClientRequest,
@@ -9,6 +16,9 @@ import {
   HttpServerResponse,
 } from '@effect/platform';
 import { env } from 'cloudflare:workers';
+import { KVClient } from './services';
+import { todo } from './utilities';
+import { SqlResolver } from '@effect/sql';
 
 const dbGetPlayers = D1Client.D1Client.pipe(
   Effect.flatMap(
@@ -25,6 +35,21 @@ export const getPlayers = dbGetPlayers.pipe(
   ),
 );
 
+const enrichAccount =
+  <T extends { name: string; tag: string }>({
+    name,
+    tag,
+  }: T): ((account: AccountV2) => AccountV2) =>
+  (account) =>
+    new AccountV2({
+      ...account,
+      data: {
+        ...account.data,
+        name: account.data.name !== '' ? account.data.name : name,
+        tag: account.data.tag !== '' ? account.data.tag : tag,
+      },
+    });
+
 const makeFetchAccount = (name: string, tag: string) =>
   HttpClient.HttpClient.pipe(
     Effect.flatMap((c) =>
@@ -33,35 +58,34 @@ const makeFetchAccount = (name: string, tag: string) =>
       ).pipe(
         HttpClientRequest.setHeaders({ Authorization: env.VALAPIKEY, Accept: '*/*' }),
         c.execute,
-        Effect.flatMap(HttpClientResponse.schemaBodyJson(Account)),
-        Effect.map((account) => ({
-          ...account,
-          data: {
-            ...account.data,
-            name: account.data.name !== '' ? account.data.name : name,
-            tag: account.data.tag !== '' ? account.data.tag : tag,
-          },
-        })),
+        Effect.flatMap(HttpClientResponse.schemaBodyJson(AccountV2)),
+        Effect.map(enrichAccount({ name, tag })),
       ),
     ),
   );
 
-const makeDbInsertPlayer = (player: Player) =>
+const makeDbInsertPlayer = <T extends Player>(player: T) =>
   D1Client.D1Client.pipe(
-    Effect.flatMap(
-      (s) =>
-        s`INSERT INTO players
-            (puuid, name, tag) 
-            values (${s(player.puuid)}, ${s(player.name)}, ${s(player.tag)}) 
-            ON CONFLICT(puuid) DO UPDATE SET name = excluded.name, tag = excluded.tag`,
+    Effect.flatMap((s) =>
+      SqlResolver.void('insertPlayer', {
+        Request: Player,
+        execute: (p) => s`INSERT INTO players ${s.insert(p)}`,
+      }),
     ),
+    Effect.flatMap((s) => s.execute(player)),
+    Effect.catchTag('SqlError', (e) => Console.log(e)),
   );
 
-export const insertPlayer = HttpServerRequest.schemaBodyJson(PlayerNameTag).pipe(
+export const insertPlayer = HttpServerRequest.schemaBodyJson(InsertPlayerSchema).pipe(
   Effect.flatMap((v) =>
     makeFetchAccount(v.name, v.tag).pipe(
       Effect.flatMap((account) =>
-        makeDbInsertPlayer({ puuid: account.data.puuid, name: v.name, tag: v.tag }),
+        makeDbInsertPlayer({
+          puuid: account.data.puuid,
+          name: v.name,
+          tag: v.tag,
+          discord_tag: v.discord_tag,
+        }),
       ),
     ),
   ),
@@ -76,7 +100,7 @@ const makeDbRemovePlayer = (puuid: string) =>
     Effect.flatMap((s) => s<Schema.Void>`DELETE FROM players WHERE puuid = ${s(puuid)}`),
   );
 
-export const removePlayer = HttpServerRequest.schemaSearchParams(PlayerPuuid).pipe(
+export const removePlayer = HttpServerRequest.schemaSearchParams(RemovePlayerSchema).pipe(
   Effect.flatMap((v) => makeDbRemovePlayer(v.puuid)),
   Effect.map(() => HttpServerResponse.empty({ status: 201 })),
   Effect.catchTags({
@@ -97,6 +121,48 @@ const makeFetchMMRHistory = (player: Player) =>
     ),
   );
 
+const enrichMMRHistory =
+  <T extends Player>({
+    name,
+    tag,
+    puuid,
+  }: T): ((mmrHistory: MMRHistory) => MMRHistoryWithPuuid) =>
+  (mmrHistory) =>
+    new MMRHistoryWithPuuid({
+      ...mmrHistory,
+      name: mmrHistory.name === '' ? name : mmrHistory.name,
+      tag: mmrHistory.tag === '' ? tag : mmrHistory.tag,
+      puuid: puuid,
+      data: Option.fromNullable(mmrHistory.data).pipe(
+        Option.map(
+          Array.sortBy(Order.mapInput(Order.reverse(Order.number), (k) => k.date_raw)),
+        ),
+        Option.getOrUndefined,
+      ),
+    });
+
+const buildReport = (m: MMRHistoryWithPuuid) =>
+  KVClient.pipe(
+    Effect.flatMap((kv) => kv.get(m.puuid)),
+    Effect.flatMap((lastMatchId) =>
+      lastMatchId.pipe(
+        Option.match({
+          onSome: (a) => todo,
+          onNone: () => todo,
+        }),
+      ),
+    ),
+  );
+
 export const scheduled = dbGetPlayers.pipe(
-  Effect.flatMap((v) => Effect.forEach(v, (z) => makeFetchMMRHistory(z))),
+  Effect.flatMap((v) =>
+    Effect.forEach(v, (z) =>
+      makeFetchMMRHistory(z).pipe(
+        Effect.map(enrichMMRHistory(z)),
+        Effect.flatMap(buildReport),
+        Effect.either,
+      ),
+    ),
+  ),
+  Effect.tap(Console.log),
 );

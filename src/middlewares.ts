@@ -1,20 +1,17 @@
-import { HttpMiddleware, HttpServerRequest, HttpServerResponse } from '@effect/platform';
+import { HttpMiddleware, HttpServerRequest } from '@effect/platform';
+import { Unauthorized } from '@effect/platform/HttpApiError';
 import { Effect } from 'effect';
 import { Option, pipe } from 'effect';
 
-export const parseAuthString = (
-  auth: string,
-  username: string,
-  password: string,
-): Option.Option<{}> =>
+export const parseAuthString = (auth: string, username: string, password: string) =>
   pipe(
     Option.some(auth),
     Option.filter((s) => s.startsWith('Basic ')),
     Option.map((s) => s.slice(6)),
     Option.map((base64) => Buffer.from(base64, 'base64').toString('utf-8')),
-    Option.flatMap((decoded) => {
+    Effect.flatMap((decoded) => {
       const [u, p] = decoded.split(':');
-      return u === username && p === password ? Option.some({}) : Option.none();
+      return u === username && p === password ? Effect.succeed({}) : new Unauthorized();
     }),
   );
 
@@ -24,7 +21,7 @@ export const makeBasicAuth = (username: string, password: string) =>
       Effect.map((req) => req.headers['authorization']),
       Effect.flatMap(Effect.fromNullable),
       Effect.flatMap((authStr) => parseAuthString(authStr, username, password)),
+      Effect.tap((v) => v),
       Effect.zipRight(app),
-      Effect.catchAll(() => HttpServerResponse.empty({ status: 401 })),
     ),
   );
