@@ -73,3 +73,32 @@ export class MMRHistoryWithPuuid extends MMRHistory.extend<MMRHistoryWithPuuid>(
 )({
   puuid: Schema.UUID,
 }) {}
+
+const MMRHistoryV2History = Schema.Struct({
+  tier: Schema.Struct({
+    id: Schema.Number,
+    name: Schema.String,
+  }),
+  match_id: Schema.UUID,
+  map: Schema.Struct({
+    id: Schema.UUID,
+    name: Schema.String,
+  }),
+  season: Schema.Struct({
+    id: Schema.UUID,
+    short: Schema.String,
+  }),
+  rr: Schema.Number,
+  last_change: Schema.Number,
+  elo: Schema.Number,
+  refunded_rr: Schema.Number,
+  was_derank_protected: Schema.Boolean,
+  date: Schema.DateTimeUtc,
+});
+
+export class MMRHistoryV2 extends BaseResponse.extend<MMRHistoryV2>('MMRHistory')({
+  data: Schema.Struct({
+    account: Schema.Struct(Struct.pick(Player.fields, 'name', 'tag', 'puuid')),
+    history: Schema.Array(MMRHistoryV2History),
+  }),
+}) {}

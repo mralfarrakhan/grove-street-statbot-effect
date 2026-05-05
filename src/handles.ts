@@ -1,12 +1,11 @@
 import { D1Client } from '@effect/sql-d1';
-import { Array, Console, Effect, Option, Order, Schema } from 'effect';
+import { Console, Effect, Option, Schema } from 'effect';
 import {
   Player,
   AccountV2,
-  MMRHistory,
-  MMRHistoryWithPuuid,
   InsertPlayerSchema,
   RemovePlayerSchema,
+  MMRHistoryV2,
 } from './schemas';
 import {
   HttpClient,
@@ -108,42 +107,22 @@ export const removePlayer = HttpServerRequest.schemaSearchParams(RemovePlayerSch
   }),
 );
 
-const makeFetchMMRHistory = (player: Player) =>
+const makeFetchMMRHistoryV2 = (player: Player) =>
   HttpClient.HttpClient.pipe(
     Effect.flatMap((c) =>
       HttpClientRequest.get(
-        `https://api.henrikdev.xyz/valorant/v1/mmr-history/ap/${player.name}/${player.tag}`,
+        `https://api.henrikdev.xyz/valorant/v2/mmr-history/ap/pc/${player.name}/${player.tag}`,
       ).pipe(
         HttpClientRequest.setHeaders({ Authorization: env.VALAPIKEY, Accept: '*/*' }),
         c.execute,
-        Effect.flatMap(HttpClientResponse.schemaBodyJson(MMRHistory)),
+        Effect.flatMap(HttpClientResponse.schemaBodyJson(MMRHistoryV2)),
       ),
     ),
   );
 
-const enrichMMRHistory =
-  <T extends Player>({
-    name,
-    tag,
-    puuid,
-  }: T): ((mmrHistory: MMRHistory) => MMRHistoryWithPuuid) =>
-  (mmrHistory) =>
-    new MMRHistoryWithPuuid({
-      ...mmrHistory,
-      name: mmrHistory.name === '' ? name : mmrHistory.name,
-      tag: mmrHistory.tag === '' ? tag : mmrHistory.tag,
-      puuid: puuid,
-      data: Option.fromNullable(mmrHistory.data).pipe(
-        Option.map(
-          Array.sortBy(Order.mapInput(Order.reverse(Order.number), (k) => k.date_raw)),
-        ),
-        Option.getOrUndefined,
-      ),
-    });
-
-const buildReport = (m: MMRHistoryWithPuuid) =>
+const buildReportV2 = (m: MMRHistoryV2) =>
   KVClient.pipe(
-    Effect.flatMap((kv) => kv.get(m.puuid)),
+    Effect.flatMap((kv) => kv.get(m.data.account.puuid)),
     Effect.flatMap((lastMatchId) =>
       lastMatchId.pipe(
         Option.match({
@@ -157,11 +136,7 @@ const buildReport = (m: MMRHistoryWithPuuid) =>
 export const scheduled = dbGetPlayers.pipe(
   Effect.flatMap((v) =>
     Effect.forEach(v, (z) =>
-      makeFetchMMRHistory(z).pipe(
-        Effect.map(enrichMMRHistory(z)),
-        Effect.flatMap(buildReport),
-        Effect.either,
-      ),
+      makeFetchMMRHistoryV2(z).pipe(Effect.flatMap(buildReportV2), Effect.either),
     ),
   ),
   Effect.tap(Console.log),
