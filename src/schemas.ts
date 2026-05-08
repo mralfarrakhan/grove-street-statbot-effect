@@ -74,7 +74,7 @@ export class MMRHistoryWithPuuid extends MMRHistory.extend<MMRHistoryWithPuuid>(
   puuid: Schema.UUID,
 }) {}
 
-const MMRHistoryV2History = Schema.Struct({
+export const MMRHistoryV2History = Schema.Struct({
   tier: Schema.Struct({
     id: Schema.Number,
     name: Schema.String,

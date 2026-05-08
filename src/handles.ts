@@ -1,11 +1,12 @@
 import { D1Client } from '@effect/sql-d1';
-import { Console, Effect, Option, Schema } from 'effect';
+import { Array, Console, DateTime, Effect, Option, Order, pipe, Schema } from 'effect';
 import {
   Player,
   AccountV2,
   InsertPlayerSchema,
   RemovePlayerSchema,
   MMRHistoryV2,
+  MMRHistoryV2History,
 } from './schemas';
 import {
   HttpClient,
@@ -16,7 +17,6 @@ import {
 } from '@effect/platform';
 import { env } from 'cloudflare:workers';
 import { KVClient } from './services';
-import { todo } from './utilities';
 import { SqlResolver } from '@effect/sql';
 
 const dbGetPlayers = D1Client.D1Client.pipe(
@@ -122,21 +122,45 @@ const makeFetchMMRHistoryV2 = (player: Player) =>
 
 const buildReportV2 = (m: MMRHistoryV2) =>
   KVClient.pipe(
-    Effect.flatMap((kv) => kv.get(m.data.account.puuid)),
-    Effect.flatMap((lastMatchId) =>
-      lastMatchId.pipe(
-        Option.match({
-          onSome: (a) => todo,
-          onNone: () => todo,
-        }),
+    Effect.flatMap((kv) =>
+      kv.get(m.data.account.puuid).pipe(
+        Effect.flatMap((lastMatchId) =>
+          lastMatchId.pipe(
+            Option.match({
+              onSome: (a) => kv.set(m.data.account.puuid, a),
+              onNone: () =>
+                Effect.fromNullable(m.data.history.at(0)).pipe(
+                  Effect.flatMap((z) => kv.set(m.data.account.puuid, z.match_id)),
+                ),
+            }),
+          ),
+        ),
       ),
     ),
   );
 
+const ensureSorted = (m: MMRHistoryV2) =>
+  new MMRHistoryV2({
+    ...m,
+    data: {
+      ...m.data,
+      history: pipe(
+        m.data.history,
+        Array.sortBy(
+          Order.mapInput(Order.reverse(Order.Date), (h) => DateTime.toDate(h.date)),
+        ),
+      ),
+    },
+  });
+
 export const scheduled = dbGetPlayers.pipe(
   Effect.flatMap((v) =>
     Effect.forEach(v, (z) =>
-      makeFetchMMRHistoryV2(z).pipe(Effect.flatMap(buildReportV2), Effect.either),
+      makeFetchMMRHistoryV2(z).pipe(
+        Effect.map(ensureSorted),
+        Effect.flatMap(buildReportV2),
+        Effect.either,
+      ),
     ),
   ),
   Effect.tap(Console.log),
