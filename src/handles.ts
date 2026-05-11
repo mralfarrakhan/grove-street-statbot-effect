@@ -1,5 +1,15 @@
 import { D1Client } from '@effect/sql-d1';
-import { Array, Console, DateTime, Effect, Option, Order, pipe, Schema } from 'effect';
+import {
+  Array,
+  Console,
+  DateTime,
+  Effect,
+  Match,
+  Option,
+  Order,
+  pipe,
+  Schema,
+} from 'effect';
 import {
   Player,
   AccountV2,
@@ -18,6 +28,7 @@ import {
 import { env } from 'cloudflare:workers';
 import { KVClient } from './services';
 import { SqlResolver } from '@effect/sql';
+import { DownRank, FirstRank, NewSeason, NoChange, reportMatch, UpRank } from './model';
 
 const dbGetPlayers = D1Client.D1Client.pipe(
   Effect.flatMap(
@@ -120,20 +131,56 @@ const makeFetchMMRHistoryV2 = (player: Player) =>
     ),
   );
 
+const makeGetLatestRankChange =
+  (m: MMRHistoryV2) => (lastMatchId: Option.Option<string>) =>
+    pipe(
+      Option.match(lastMatchId, {
+        onNone: () => [...m.data.history],
+        onSome: (lastMatchId) =>
+          pipe(
+            Array.findFirstIndex(m.data.history, (x) => x.match_id === lastMatchId),
+            Option.map((l) => Array.take(m.data.history, l)),
+            Option.getOrElse(() => [...m.data.history]),
+          ),
+      }),
+      (tt) => Array.zip(tt, Array.drop(tt, 1)),
+      (u) => Array.findFirst(u, ([l, r]) => l.tier.id !== r.tier.id),
+      Option.flatMap(([l, r]) =>
+        Match.value({ v: { l, r } }).pipe(
+          Match.when({ v: ({ l, r }) => l.season.id !== r.season.id }, () => NewSeason()),
+          Match.when({ v: ({ l, r }) => r.tier.id === 0 }, () => FirstRank()),
+          Match.when(
+            { v: ({ l, r }) => l.season.id === r.season.id && l.tier.id > r.tier.id },
+            () => UpRank(),
+          ),
+          Match.when(
+            { v: ({ l, r }) => l.season.id === r.season.id && l.tier.id < r.tier.id },
+            () => DownRank(),
+          ),
+          Match.option,
+        ),
+      ),
+      Option.getOrElse(() => NoChange()),
+    );
+
 const buildReportV2 = (m: MMRHistoryV2) =>
   KVClient.pipe(
     Effect.flatMap((kv) =>
       kv.get(m.data.account.puuid).pipe(
-        Effect.flatMap((lastMatchId) =>
-          lastMatchId.pipe(
-            Option.match({
-              onSome: (a) => kv.set(m.data.account.puuid, a),
-              onNone: () =>
-                Effect.fromNullable(m.data.history.at(0)).pipe(
-                  Effect.flatMap((z) => kv.set(m.data.account.puuid, z.match_id)),
-                ),
-            }),
+        Effect.map(makeGetLatestRankChange(m)),
+        Effect.zipLeft(
+          Effect.fromNullable(m.data.history.at(0)).pipe(
+            Effect.flatMap((z) => kv.set(m.data.account.puuid, z.match_id)),
           ),
+        ),
+        Effect.map(
+          reportMatch({
+            NoChange: () => '',
+            FirstRank: () => '',
+            DownRank: () => '',
+            UpRank: () => '',
+            NewSeason: () => '',
+          }),
         ),
       ),
     ),
@@ -153,11 +200,20 @@ const ensureSorted = (m: MMRHistoryV2) =>
     },
   });
 
+const inspectRanks = (m: MMRHistoryV2) =>
+  pipe(
+    m.data.history,
+    Array.map((z) => ({ rank: z.tier.name, season: z.season.short })),
+    Effect.succeed,
+    Effect.flatMap(Console.log),
+  );
+
 export const scheduled = dbGetPlayers.pipe(
   Effect.flatMap((v) =>
     Effect.forEach(v, (z) =>
       makeFetchMMRHistoryV2(z).pipe(
         Effect.map(ensureSorted),
+        Effect.tap(inspectRanks),
         Effect.flatMap(buildReportV2),
         Effect.either,
       ),

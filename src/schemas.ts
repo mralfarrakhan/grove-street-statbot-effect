@@ -74,7 +74,7 @@ export class MMRHistoryWithPuuid extends MMRHistory.extend<MMRHistoryWithPuuid>(
   puuid: Schema.UUID,
 }) {}
 
-export const MMRHistoryV2History = Schema.Struct({
+const MMRHistoryV2HistorySchema = Schema.Struct({
   tier: Schema.Struct({
     id: Schema.Number,
     name: Schema.String,
@@ -96,9 +96,11 @@ export const MMRHistoryV2History = Schema.Struct({
   date: Schema.DateTimeUtc,
 });
 
+export type MMRHistoryV2History = typeof MMRHistoryV2HistorySchema.Type;
+
 export class MMRHistoryV2 extends BaseResponse.extend<MMRHistoryV2>('MMRHistory')({
   data: Schema.Struct({
     account: Schema.Struct(Struct.pick(Player.fields, 'name', 'tag', 'puuid')),
-    history: Schema.Array(MMRHistoryV2History),
+    history: Schema.Array(MMRHistoryV2HistorySchema),
   }),
 }) {}
