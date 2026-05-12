@@ -31,7 +31,7 @@ const servo = HttpRouter.empty.pipe(
   HttpRouter.mount('/api', api),
   Effect.catchTags({
     RouteNotFound: () => HttpServerResponse.text('Not Found', { status: 404 }),
-    Unauthorized: () => HttpServerResponse.empty({ status: 404 }),
+    Unauthorized: () => HttpServerResponse.empty({ status: 401 }),
   }),
   Effect.catchAllCause((cause) =>
     HttpServerResponse.json({ message: cause.toJSON() }, { status: 500 }),

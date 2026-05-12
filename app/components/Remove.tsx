@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Modal } from './Modal';
 
-export const Add = () => {
+export const Remove = () => {
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState('');
 
@@ -16,21 +16,17 @@ export const Add = () => {
 
     const name = String(data.get('name')).trim();
     const tag = String(data.get('tag')).trim();
-    const discord_tag = data.get('discord_tag')
-      ? String(data.get('discord_tag')).trim()
-      : null;
 
     const body = {
       name,
       tag,
-      discord_tag,
     };
 
     const basicAuth = btoa(`${username}:${password}`);
 
     try {
       const resp = await fetch('/api/players', {
-        method: 'PUT',
+        method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Basic ${basicAuth}`,
@@ -140,30 +136,6 @@ export const Add = () => {
               required
             />
           </div>
-        </div>
-
-        <div>
-          <label
-            htmlFor="discord_tag"
-            className="mb-1 block text-sm font-medium text-zinc-300"
-          >
-            Discord Tag
-          </label>
-
-          <input
-            id="discord_tag"
-            type="text"
-            name="discord_tag"
-            placeholder="discord_tag"
-            className="
-                w-full rounded-lg border border-zinc-700
-                bg-zinc-800 px-4 py-2 text-zinc-100
-                placeholder:text-zinc-500
-                outline-none transition
-                focus:border-lime-400
-                focus:ring-2 focus:ring-lime-400/20
-              "
-          />
         </div>
 
         <button
