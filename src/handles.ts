@@ -104,13 +104,18 @@ export const insertPlayer = HttpServerRequest.schemaBodyJson(InsertPlayerSchema)
   }),
 );
 
-const makeDbRemovePlayer = (puuid: string) =>
+const makeDbRemovePlayer = (name: string, tag: string) =>
   D1Client.D1Client.pipe(
-    Effect.flatMap((s) => s<Schema.Void>`DELETE FROM players WHERE puuid = ${s(puuid)}`),
+    Effect.tap(() => Console.log(`name '${name}' tag '${tag}'`)),
+    Effect.flatMap(
+      (s) =>
+        s<Schema.Void>`DELETE FROM players WHERE name = ${s(name)} AND tag = ${s(tag)}`,
+    ),
   );
 
-export const removePlayer = HttpServerRequest.schemaSearchParams(RemovePlayerSchema).pipe(
-  Effect.flatMap((v) => makeDbRemovePlayer(v.puuid)),
+export const removePlayer = HttpServerRequest.schemaBodyJson(RemovePlayerSchema).pipe(
+  Effect.flatMap((v) => makeDbRemovePlayer(v.name, v.tag)),
+  Effect.tap((v) => Console.log(v)),
   Effect.map(() => HttpServerResponse.empty({ status: 201 })),
   Effect.catchTags({
     ParseError: (c) => HttpServerResponse.json({ message: c.message }, { status: 400 }),

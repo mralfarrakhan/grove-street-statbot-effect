@@ -11,7 +11,9 @@ export const InsertPlayerSchema = Schema.Struct(
   Struct.pick(Player.fields, 'name', 'tag', 'discord_tag'),
 );
 
-export const RemovePlayerSchema = Schema.Struct(Struct.pick(Player.fields, 'puuid'));
+export const RemovePlayerSchema = Schema.Struct(
+  Struct.pick(Player.fields, 'name', 'tag'),
+);
 
 export class Errors extends Schema.Class<Errors>('Errors')({
   message: Schema.String,

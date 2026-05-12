@@ -11,7 +11,9 @@ export const parseAuthString = (auth: string, username: string, password: string
     Option.map((base64) => Buffer.from(base64, 'base64').toString('utf-8')),
     Effect.flatMap((decoded) => {
       const [u, p] = decoded.split(':');
-      return u === username && p === password ? Effect.succeed({}) : new Unauthorized();
+      return u === username && p === password
+        ? Effect.succeed({})
+        : Effect.fail(new Unauthorized());
     }),
   );
 
