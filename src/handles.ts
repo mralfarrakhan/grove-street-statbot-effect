@@ -16,7 +16,6 @@ import {
   InsertPlayerSchema,
   RemovePlayerSchema,
   MMRHistoryV2,
-  MMRHistoryV2History,
 } from './schemas';
 import {
   HttpClient,
@@ -148,7 +147,7 @@ const makeGetLatestRankChange =
       Option.flatMap(([l, r]) =>
         Match.value({ v: { l, r } }).pipe(
           Match.when({ v: ({ l, r }) => l.season.id !== r.season.id }, () => NewSeason()),
-          Match.when({ v: ({ l, r }) => r.tier.id === 0 }, () => FirstRank()),
+          Match.when({ v: ({ r }) => r.tier.id === 0 }, () => FirstRank()),
           Match.when(
             { v: ({ l, r }) => l.season.id === r.season.id && l.tier.id > r.tier.id },
             () => UpRank(),

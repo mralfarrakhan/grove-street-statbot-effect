@@ -22,9 +22,13 @@ const playerRoute = HttpRouter.empty.pipe(
   HttpRouter.get('/', getPlayers),
 );
 
-const servo = HttpRouter.empty.pipe(
+const api = HttpRouter.empty.pipe(
   HttpRouter.mount('/players', playerRoute),
   HttpRouter.get('/', HttpServerResponse.text('ok')),
+);
+
+const servo = HttpRouter.empty.pipe(
+  HttpRouter.mount('/api', api),
   Effect.catchTags({
     RouteNotFound: () => HttpServerResponse.text('Not Found', { status: 404 }),
     Unauthorized: () => HttpServerResponse.empty({ status: 404 }),
@@ -42,8 +46,8 @@ const scheduled = runScheduled.pipe(
 );
 
 export default {
-  fetch: (request, env, ctx) => servo(request),
-  scheduled: async (controller, env, ctx) => {
+  fetch: (request, _env, _ctx) => servo(request),
+  scheduled: async (_controller, _env, ctx) => {
     ctx.waitUntil(Effect.runPromise(scheduled));
   },
 } satisfies ExportedHandler<Env>;

@@ -1,0 +1,39 @@
+{
+  "compilerOptions": {
+    "target": "es2024",
+    "lib": ["es2024"],
+
+    "module": "es2022",
+    "moduleResolution": "Bundler",
+    "resolveJsonModule": true,
+
+    "allowJs": true,
+    "checkJs": false,
+
+    "noEmit": true,
+
+    "isolatedModules": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+
+    "strict": true,
+
+    "noUncheckedIndexedAccess": true,
+
+    "skipLibCheck": true,
+    "types": ["./worker-configuration.d.ts", "node"],
+    "plugins": [
+      {
+        "name": "@effect/language-service"
+      }
+    ],
+
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "exclude": ["test"],
+  "include": ["worker-configuration.d.ts", "src/**/*.ts"]
+}

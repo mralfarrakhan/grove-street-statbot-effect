@@ -13,7 +13,7 @@ export class KVError extends Data.TaggedError('KVError')<{
 export class KVClient extends Context.Tag('KVClient')<
   KVClient,
   {
-    readonly get: <T>(key: string) => Effect.Effect<Option.Option<string>, KVError>;
+    readonly get: (key: string) => Effect.Effect<Option.Option<string>, KVError>;
     readonly set: (key: string, value: string) => Effect.Effect<void, KVError>;
   }
 >() {}
