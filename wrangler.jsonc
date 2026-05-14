@@ -4,7 +4,7 @@
  */
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "grove-street-statbot-effect",
+  "name": "grove-street-statbot",
   "main": "src/index.ts",
   "compatibility_date": "2026-05-02",
   "observability": {
