@@ -1,21 +1,12 @@
 import { D1Client } from '@effect/sql-d1';
-import {
-  Array,
-  Console,
-  DateTime,
-  Effect,
-  Match,
-  Option,
-  Order,
-  pipe,
-  Schema,
-} from 'effect';
+import { Array, DateTime, Effect, Match, Option, Order, pipe, Schema } from 'effect';
 import {
   Player,
   AccountV2,
   InsertPlayerSchema,
   RemovePlayerSchema,
   MMRHistoryV2,
+  HookMessage,
 } from './schemas';
 import {
   HttpClient,
@@ -91,7 +82,6 @@ const makeDbInsertPlayer = <T extends Player>(player: T) =>
       }),
     ),
     Effect.flatMap((s) => s.execute(player)),
-    Effect.catchTag('SqlError', (e) => Console.log(e)),
   );
 
 export const insertPlayer = HttpServerRequest.schemaBodyJson(InsertPlayerSchema).pipe(
@@ -191,18 +181,26 @@ const makeBuildReport = (p: Player) => (r: Report) =>
       NoChange: () => Option.none(),
       FirstRank: ({ rank }) =>
         Option.some(
-          `${p.name}#${p.tag} has started this season as ${rank}. keep the good work <@${p.discord_user_id}>.`,
+          `**${p.name}#${p.tag}** has started this season as ${rank}. keep the good work <@${p.discord_user_id}>.`,
         ),
       DownRank: ({ newRank }) =>
         Option.some(
-          `${p.name}#${p.tag} has been demoted to ${newRank}. too bad, <@${p.discord_user_id}>.`,
+          `**${p.name}#${p.tag}** has been demoted to ${newRank}. too bad, <@${p.discord_user_id}>.`,
         ),
       UpRank: ({ newRank }) =>
         Option.some(
-          `${p.name}#${p.tag} has been promoted to ${newRank}. well done, <@${p.discord_user_id}>.`,
+          `**${p.name}#${p.tag}** has been promoted to ${newRank}. well done, <@${p.discord_user_id}>.`,
         ),
       NewSeason: () => Option.none(),
     }),
+    Option.map((m) =>
+      Schema.decodeUnknown(HookMessage)({
+        content: m,
+        username: 'Sova',
+        avatar_url:
+          'https://media.valorant-api.com/agents/320b2a48-4d9b-a075-30f1-1f93a9b638fa/killfeedportrait.png',
+      }),
+    ),
   );
 
 const buildCategory = (m: MMRHistoryV2) =>
@@ -235,6 +233,17 @@ const ensureSorted = (m: MMRHistoryV2) =>
     },
   });
 
+const makeSendReport = (m: HookMessage) =>
+  HttpClient.HttpClient.pipe(
+    Effect.zipWith(Schema.encode(HookMessage)(m), (c, msg) =>
+      HttpClientRequest.post(env.WEBHOOK_URL).pipe(
+        HttpClientRequest.bodyJson(msg),
+        Effect.flatMap(c.execute),
+      ),
+    ),
+    Effect.flatten,
+  );
+
 export const scheduled = dbGetPlayers.pipe(
   Effect.flatMap((v) =>
     Effect.forEach(
@@ -243,11 +252,12 @@ export const scheduled = dbGetPlayers.pipe(
         makeFetchMMRHistoryV2(z).pipe(
           Effect.map(ensureSorted),
           Effect.flatMap(buildCategory),
-          Effect.map(makeBuildReport(z)),
+          Effect.flatMap(makeBuildReport(z)),
+          Effect.flatten,
+          Effect.flatMap(makeSendReport),
           Effect.either,
         ),
       { concurrency: 'unbounded' },
     ),
   ),
-  Effect.tap(Console.log),
 );

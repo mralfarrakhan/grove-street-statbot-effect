@@ -106,3 +106,9 @@ export class MMRHistoryV2 extends BaseResponse.extend<MMRHistoryV2>('MMRHistory'
     history: Schema.Array(MMRHistoryV2HistorySchema),
   }),
 }) {}
+
+export class HookMessage extends Schema.Class<HookMessage>('HookMessage')({
+  content: Schema.String,
+  username: Schema.String,
+  avatar_url: Schema.URL,
+}) {}
