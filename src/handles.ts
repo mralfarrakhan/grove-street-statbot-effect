@@ -27,11 +27,20 @@ import {
 import { env } from 'cloudflare:workers';
 import { KVClient } from './services';
 import { SqlResolver } from '@effect/sql';
-import { DownRank, FirstRank, NewSeason, NoChange, reportMatch, UpRank } from './model';
+import {
+  DownRank,
+  FirstRank,
+  NewSeason,
+  NoChange,
+  reportMatch,
+  UpRank,
+  type Report,
+} from './model';
 
 const dbGetPlayers = D1Client.D1Client.pipe(
   Effect.flatMap(
-    (v) => v<Player>`SELECT puuid, name, tag FROM players ORDER BY name DESC`,
+    (v) =>
+      v<Player>`SELECT puuid, name, tag, discord_tag FROM players ORDER BY name DESC`,
   ),
 );
 
@@ -150,14 +159,24 @@ const makeGetLatestRankChange =
       Option.flatMap(([l, r]) =>
         Match.value({ v: { l, r } }).pipe(
           Match.when({ v: ({ l, r }) => l.season.id !== r.season.id }, () => NewSeason()),
-          Match.when({ v: ({ r }) => r.tier.id === 0 }, () => FirstRank()),
+          Match.when({ v: ({ r }) => r.tier.id === 0 }, () =>
+            FirstRank({ rank: l.tier.name }),
+          ),
           Match.when(
             { v: ({ l, r }) => l.season.id === r.season.id && l.tier.id > r.tier.id },
-            () => UpRank(),
+            () =>
+              UpRank({
+                oldRank: r.tier.name,
+                newRank: l.tier.name,
+              }),
           ),
           Match.when(
             { v: ({ l, r }) => l.season.id === r.season.id && l.tier.id < r.tier.id },
-            () => DownRank(),
+            () =>
+              DownRank({
+                oldRank: r.tier.name,
+                newRank: l.tier.name,
+              }),
           ),
           Match.option,
         ),
@@ -165,26 +184,40 @@ const makeGetLatestRankChange =
       Option.getOrElse(() => NoChange()),
     );
 
-const buildReportV2 = (m: MMRHistoryV2) =>
+const makeBuildReport = (p: Player) => (r: Report) =>
+  pipe(
+    r,
+    reportMatch({
+      NoChange: () => Option.none(),
+      FirstRank: ({ rank }) =>
+        Option.some(
+          `${p.name}#${p.tag} has started this season as ${rank}. keep the good work @${p.discord_tag}.`,
+        ),
+      DownRank: ({ newRank }) =>
+        Option.some(
+          `${p.name}#${p.tag} has been demoted to ${newRank}. too bad, @${p.discord_tag}.`,
+        ),
+      UpRank: ({ newRank }) =>
+        Option.some(
+          `${p.name}#${p.tag} has been promoted to ${newRank}. well done, @${p.discord_tag}.`,
+        ),
+      NewSeason: () => Option.none(),
+    }),
+  );
+
+const buildCategory = (m: MMRHistoryV2) =>
   KVClient.pipe(
     Effect.flatMap((kv) =>
-      kv.get(m.data.account.puuid).pipe(
-        Effect.map(makeGetLatestRankChange(m)),
-        Effect.zipLeft(
-          Effect.fromNullable(m.data.history.at(0)).pipe(
-            Effect.flatMap((z) => kv.set(m.data.account.puuid, z.match_id)),
+      kv
+        .get(m.data.account.puuid)
+        .pipe(
+          Effect.map(makeGetLatestRankChange(m)),
+          Effect.zipLeft(
+            Effect.fromNullable(m.data.history.at(0)).pipe(
+              Effect.flatMap((z) => kv.set(m.data.account.puuid, z.match_id)),
+            ),
           ),
         ),
-        Effect.map(
-          reportMatch({
-            NoChange: () => '',
-            FirstRank: () => '',
-            DownRank: () => '',
-            UpRank: () => '',
-            NewSeason: () => '',
-          }),
-        ),
-      ),
     ),
   );
 
@@ -202,23 +235,18 @@ const ensureSorted = (m: MMRHistoryV2) =>
     },
   });
 
-const inspectRanks = (m: MMRHistoryV2) =>
-  pipe(
-    m.data.history,
-    Array.map((z) => ({ rank: z.tier.name, season: z.season.short })),
-    Effect.succeed,
-    Effect.flatMap(Console.log),
-  );
-
 export const scheduled = dbGetPlayers.pipe(
   Effect.flatMap((v) =>
-    Effect.forEach(v, (z) =>
-      makeFetchMMRHistoryV2(z).pipe(
-        Effect.map(ensureSorted),
-        Effect.tap(inspectRanks),
-        Effect.flatMap(buildReportV2),
-        Effect.either,
-      ),
+    Effect.forEach(
+      v,
+      (z) =>
+        makeFetchMMRHistoryV2(z).pipe(
+          Effect.map(ensureSorted),
+          Effect.flatMap(buildCategory),
+          Effect.map(makeBuildReport(z)),
+          Effect.either,
+        ),
+      { concurrency: 'unbounded' },
     ),
   ),
   Effect.tap(Console.log),

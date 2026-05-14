@@ -2,9 +2,17 @@ import { Data } from 'effect';
 
 export type Report = Data.TaggedEnum<{
   NoChange: {};
-  FirstRank: {};
-  DownRank: {};
-  UpRank: {};
+  FirstRank: {
+    readonly rank: string;
+  };
+  DownRank: {
+    readonly oldRank: string;
+    readonly newRank: string;
+  };
+  UpRank: {
+    readonly oldRank: string;
+    readonly newRank: string;
+  };
   NewSeason: {};
 }>;
 
