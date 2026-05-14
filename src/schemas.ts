@@ -4,11 +4,11 @@ export class Player extends Schema.Class<Player>('Player')({
   name: Schema.String,
   tag: Schema.String,
   puuid: Schema.UUID,
-  discord_tag: Schema.optional(Schema.String),
+  discord_user_id: Schema.optional(Schema.String),
 }) {}
 
 export const InsertPlayerSchema = Schema.Struct(
-  Struct.pick(Player.fields, 'name', 'tag', 'discord_tag'),
+  Struct.pick(Player.fields, 'name', 'tag', 'discord_user_id'),
 );
 
 export const RemovePlayerSchema = Schema.Struct(

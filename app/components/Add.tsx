@@ -5,7 +5,7 @@ export const Add = () => {
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState('');
 
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>): Promise<void> => {
+  const handleSubmit = async (e: React.SubmitEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
 
     const form = e.currentTarget;
@@ -16,14 +16,14 @@ export const Add = () => {
 
     const name = String(data.get('name')).trim();
     const tag = String(data.get('tag')).trim();
-    const discord_tag = data.get('discord_tag')
-      ? String(data.get('discord_tag')).trim()
+    const discord_user_id = data.get('discord_user_id')
+      ? String(data.get('discord_user_id')).trim()
       : null;
 
     const body = {
       name,
       tag,
-      discord_tag,
+      discord_user_id: discord_user_id,
     };
 
     const basicAuth = btoa(`${username}:${password}`);
@@ -144,17 +144,17 @@ export const Add = () => {
 
         <div>
           <label
-            htmlFor="discord_tag"
+            htmlFor="discord_user_id"
             className="mb-1 block text-sm font-medium text-zinc-300"
           >
             Discord Tag
           </label>
 
           <input
-            id="discord_tag"
+            id="discord_user_id"
             type="text"
-            name="discord_tag"
-            placeholder="discord_tag"
+            name="discord_user_id"
+            placeholder="discord_user_id"
             className="
                 w-full rounded-lg border border-zinc-700
                 bg-zinc-800 px-4 py-2 text-zinc-100

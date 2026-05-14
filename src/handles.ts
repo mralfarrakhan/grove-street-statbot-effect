@@ -40,7 +40,7 @@ import {
 const dbGetPlayers = D1Client.D1Client.pipe(
   Effect.flatMap(
     (v) =>
-      v<Player>`SELECT puuid, name, tag, discord_tag FROM players ORDER BY name DESC`,
+      v<Player>`SELECT puuid, name, tag, discord_user_id FROM players ORDER BY name DESC`,
   ),
 );
 
@@ -102,7 +102,7 @@ export const insertPlayer = HttpServerRequest.schemaBodyJson(InsertPlayerSchema)
           puuid: account.data.puuid,
           name: v.name,
           tag: v.tag,
-          discord_tag: v.discord_tag,
+          discord_user_id: v.discord_user_id,
         }),
       ),
     ),
@@ -191,15 +191,15 @@ const makeBuildReport = (p: Player) => (r: Report) =>
       NoChange: () => Option.none(),
       FirstRank: ({ rank }) =>
         Option.some(
-          `${p.name}#${p.tag} has started this season as ${rank}. keep the good work @${p.discord_tag}.`,
+          `${p.name}#${p.tag} has started this season as ${rank}. keep the good work <@${p.discord_user_id}>.`,
         ),
       DownRank: ({ newRank }) =>
         Option.some(
-          `${p.name}#${p.tag} has been demoted to ${newRank}. too bad, @${p.discord_tag}.`,
+          `${p.name}#${p.tag} has been demoted to ${newRank}. too bad, <@${p.discord_user_id}>.`,
         ),
       UpRank: ({ newRank }) =>
         Option.some(
-          `${p.name}#${p.tag} has been promoted to ${newRank}. well done, @${p.discord_tag}.`,
+          `${p.name}#${p.tag} has been promoted to ${newRank}. well done, <@${p.discord_user_id}>.`,
         ),
       NewSeason: () => Option.none(),
     }),
