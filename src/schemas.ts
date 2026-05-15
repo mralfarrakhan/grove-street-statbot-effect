@@ -11,9 +11,7 @@ export const InsertPlayerSchema = Schema.Struct(
   Struct.pick(Player.fields, 'name', 'tag', 'discord_user_id'),
 );
 
-export const RemovePlayerSchema = Schema.Struct(
-  Struct.pick(Player.fields, 'name', 'tag'),
-);
+export const RemovePlayerSchema = Schema.Struct(Struct.pick(Player.fields, 'name', 'tag'));
 
 export class Errors extends Schema.Class<Errors>('Errors')({
   message: Schema.String,
@@ -111,4 +109,26 @@ export class HookMessage extends Schema.Class<HookMessage>('HookMessage')({
   content: Schema.String,
   username: Schema.String,
   avatar_url: Schema.URL,
+}) {}
+
+export class Agent extends Schema.Class<Agent>('AgentData')({
+  displayName: Schema.String,
+  displayIcon: Schema.URL,
+  description: Schema.String,
+}) {}
+
+export class Agents extends BaseResponse.extend<Agents>('Agents')({
+  data: Schema.Array(Agent),
+}) {}
+
+export class AIMessage extends Schema.Class<AIMessage>('AIMessage')({
+  content: Schema.optional(Schema.String),
+}) {}
+
+export class AIChoice extends Schema.Class<AIChoice>('AIChoice')({
+  message: AIMessage,
+}) {}
+
+export class AIResponse extends Schema.Class<AIResponse>('AIResponse')({
+  choices: Schema.Array(AIChoice),
 }) {}
