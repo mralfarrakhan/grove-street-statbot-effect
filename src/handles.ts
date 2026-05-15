@@ -40,13 +40,19 @@ import {
   UpRank,
   type Report,
 } from './model';
-import { downRankPrompt, firstRankPrompt, promptGenerator, upRankPrompt } from './prompts';
+import {
+  downRankPrompt,
+  firstRankPrompt,
+  promptGenerator,
+  upRankPrompt,
+} from './prompts';
 import he from 'he';
 import mustache from 'mustache';
 
 const dbGetPlayers = D1Client.D1Client.pipe(
   Effect.flatMap(
-    (v) => v<Player>`SELECT puuid, name, tag, discord_user_id FROM players ORDER BY name DESC`,
+    (v) =>
+      v<Player>`SELECT puuid, name, tag, discord_user_id FROM players ORDER BY name DESC`,
   ),
 );
 
@@ -77,7 +83,9 @@ const enrichAccount =
 const makeFetchAccount = (name: string, tag: string) =>
   HttpClient.HttpClient.pipe(
     Effect.flatMap((c) =>
-      HttpClientRequest.get(`https://api.henrikdev.xyz/valorant/v2/account/${name}/${tag}`).pipe(
+      HttpClientRequest.get(
+        `https://api.henrikdev.xyz/valorant/v2/account/${name}/${tag}`,
+      ).pipe(
         HttpClientRequest.setHeaders({ Authorization: env.VALAPIKEY, Accept: '*/*' }),
         c.execute,
         Effect.flatMap(HttpClientResponse.schemaBodyJson(AccountV2)),
@@ -119,7 +127,8 @@ export const insertPlayer = HttpServerRequest.schemaBodyJson(InsertPlayerSchema)
 const makeDbRemovePlayer = (name: string, tag: string) =>
   D1Client.D1Client.pipe(
     Effect.flatMap(
-      (s) => s<Schema.Void>`DELETE FROM players WHERE name = ${s(name)} AND tag = ${s(tag)}`,
+      (s) =>
+        s<Schema.Void>`DELETE FROM players WHERE name = ${s(name)} AND tag = ${s(tag)}`,
     ),
   );
 
@@ -144,40 +153,47 @@ const makeFetchMMRHistoryV2 = (player: Player) =>
     ),
   );
 
-const makeGetLatestRankChange = (m: MMRHistoryV2) => (lastMatchId: Option.Option<string>) =>
-  pipe(
-    Option.match(lastMatchId, {
-      onNone: () => [...m.data.history],
-      onSome: (lastMatchId) =>
-        pipe(
-          Array.findFirstIndex(m.data.history, (x) => x.match_id === lastMatchId),
-          Option.map((l) => Array.take(m.data.history, l)),
-          Option.getOrElse(() => [...m.data.history]),
+const makeGetLatestRankChange =
+  (m: MMRHistoryV2) => (lastMatchId: Option.Option<string>) =>
+    pipe(
+      Option.match(lastMatchId, {
+        onNone: () => [...m.data.history],
+        onSome: (lastMatchId) =>
+          pipe(
+            Array.findFirstIndex(m.data.history, (x) => x.match_id === lastMatchId),
+            Option.map((l) => Array.take(m.data.history, l)),
+            Option.getOrElse(() => [...m.data.history]),
+          ),
+      }),
+      (tt) => Array.zip(tt, Array.drop(tt, 1)),
+      (u) => Array.findFirst(u, ([l, r]) => l.tier.id !== r.tier.id),
+      Option.flatMap(([l, r]) =>
+        Match.value({ v: { l, r } }).pipe(
+          Match.when({ v: ({ l, r }) => l.season.id !== r.season.id }, () => NewSeason()),
+          Match.when({ v: ({ r }) => r.tier.id === 0 }, () =>
+            FirstRank({ rank: l.tier.name }),
+          ),
+          Match.when(
+            { v: ({ l, r }) => l.season.id === r.season.id && l.tier.id > r.tier.id },
+            () =>
+              UpRank({
+                oldRank: r.tier.name,
+                newRank: l.tier.name,
+              }),
+          ),
+          Match.when(
+            { v: ({ l, r }) => l.season.id === r.season.id && l.tier.id < r.tier.id },
+            () =>
+              DownRank({
+                oldRank: r.tier.name,
+                newRank: l.tier.name,
+              }),
+          ),
+          Match.option,
         ),
-    }),
-    (tt) => Array.zip(tt, Array.drop(tt, 1)),
-    (u) => Array.findFirst(u, ([l, r]) => l.tier.id !== r.tier.id),
-    Option.flatMap(([l, r]) =>
-      Match.value({ v: { l, r } }).pipe(
-        Match.when({ v: ({ l, r }) => l.season.id !== r.season.id }, () => NewSeason()),
-        Match.when({ v: ({ r }) => r.tier.id === 0 }, () => FirstRank({ rank: l.tier.name })),
-        Match.when({ v: ({ l, r }) => l.season.id === r.season.id && l.tier.id > r.tier.id }, () =>
-          UpRank({
-            oldRank: r.tier.name,
-            newRank: l.tier.name,
-          }),
-        ),
-        Match.when({ v: ({ l, r }) => l.season.id === r.season.id && l.tier.id < r.tier.id }, () =>
-          DownRank({
-            oldRank: r.tier.name,
-            newRank: l.tier.name,
-          }),
-        ),
-        Match.option,
       ),
-    ),
-    Option.getOrElse(() => NoChange()),
-  );
+      Option.getOrElse(() => NoChange()),
+    );
 
 const llmReportGenerator = <
   M extends {
@@ -266,7 +282,7 @@ const makeBuildReport = (p: Player) => (r: Report) =>
                       Schema.decodeUnknown(HookMessage)({
                         content: m,
                         username: a.displayName,
-                        avatar_url: a.displayIcon,
+                        avatar_url: a.displayIcon.toString(),
                       }),
                     ),
                   ),
@@ -304,7 +320,9 @@ const ensureSorted = (m: MMRHistoryV2) =>
       ...m.data,
       history: pipe(
         m.data.history,
-        Array.sortBy(Order.mapInput(Order.reverse(Order.Date), (h) => DateTime.toDate(h.date))),
+        Array.sortBy(
+          Order.mapInput(Order.reverse(Order.Date), (h) => DateTime.toDate(h.date)),
+        ),
       ),
     },
   });
