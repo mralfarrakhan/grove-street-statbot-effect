@@ -2,8 +2,10 @@ import { useState } from 'react';
 import { Modal } from './Modal';
 
 export const Add = () => {
-  const [open, setOpen] = useState(false);
-  const [message, setMessage] = useState('');
+  const [errorOpen, setErrorOpen] = useState(false);
+  const [okOpen, setOkOpen] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [okMessage, setOkMessage] = useState('');
 
   const handleSubmit = async (e: React.SubmitEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
@@ -45,19 +47,28 @@ export const Add = () => {
       }
 
       form.reset();
-    } catch (e: unknown) {
-      setMessage(e instanceof Error ? e.message : String(e));
 
-      setOpen(true);
+      setOkMessage(`${name}#${tag} is added to the watchlist!`);
+      setOkOpen(true);
+    } catch (e: unknown) {
+      setErrorMessage(e instanceof Error ? e.message : String(e));
+
+      setErrorOpen(true);
     }
   };
 
   return (
     <>
-      {open && <Modal onClose={() => setOpen(false)} message={message} />}
+      {errorOpen && (
+        <Modal onClose={() => setErrorOpen(false)} message={errorMessage} isError />
+      )}
+      {okOpen && <Modal onClose={() => setOkOpen(false)} message={okMessage} />}
       <form className="space-y-4" onSubmit={handleSubmit}>
         <div>
-          <label htmlFor="username" className="mb-1 block text-sm font-medium text-zinc-300">
+          <label
+            htmlFor="username"
+            className="mb-1 block text-sm font-medium text-zinc-300"
+          >
             Username
           </label>
 
@@ -72,7 +83,10 @@ export const Add = () => {
         </div>
 
         <div>
-          <label htmlFor="password" className="mb-1 block text-sm font-medium text-zinc-300">
+          <label
+            htmlFor="password"
+            className="mb-1 block text-sm font-medium text-zinc-300"
+          >
             Password
           </label>
 
@@ -109,7 +123,10 @@ export const Add = () => {
         </div>
 
         <div>
-          <label htmlFor="discord_user_id" className="mb-1 block text-sm font-medium text-zinc-300">
+          <label
+            htmlFor="discord_user_id"
+            className="mb-1 block text-sm font-medium text-zinc-300"
+          >
             Discord Tag
           </label>
 
