@@ -38,42 +38,6 @@ export class AccountV2 extends BaseResponse.extend<AccountV2>('Account')({
   }),
 }) {}
 
-export class MMRHistory extends BaseResponse.extend<MMRHistory>('MMRHistory')({
-  name: Schema.String,
-  tag: Schema.String,
-  data: Schema.optional(
-    Schema.Array(
-      Schema.Struct({
-        currenttier: Schema.Number,
-        currenttierpatched: Schema.String,
-        images: Schema.Struct({
-          small: Schema.String,
-          large: Schema.String,
-          triangle_down: Schema.String,
-          triangle_up: Schema.String,
-        }),
-        match_id: Schema.String,
-        map: Schema.Struct({
-          id: Schema.String,
-          name: Schema.String,
-        }),
-        season_id: Schema.String,
-        ranking_in_tier: Schema.Number,
-        mmr_change_to_last_game: Schema.Number,
-        elo: Schema.Number,
-        date: Schema.String,
-        date_raw: Schema.Number,
-      }),
-    ),
-  ),
-}) {}
-
-export class MMRHistoryWithPuuid extends MMRHistory.extend<MMRHistoryWithPuuid>(
-  'MMRHistoryWithPuuid',
-)({
-  puuid: Schema.UUID,
-}) {}
-
 const MMRHistoryV2HistorySchema = Schema.Struct({
   tier: Schema.Struct({
     id: Schema.Number,
