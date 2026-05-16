@@ -53,10 +53,7 @@ export const Remove = () => {
       {open && <Modal onClose={() => setOpen(false)} message={message} />}
       <form className="space-y-4" onSubmit={handleSubmit}>
         <div>
-          <label
-            htmlFor="username"
-            className="mb-1 block text-sm font-medium text-zinc-300"
-          >
+          <label htmlFor="username" className="mb-1 block text-sm font-medium text-zinc-300">
             Username
           </label>
 
@@ -65,23 +62,13 @@ export const Remove = () => {
             name="username"
             type="text"
             placeholder="Username"
-            className="
-                w-full rounded-lg border border-zinc-700
-                bg-zinc-800 px-4 py-2 text-zinc-100
-                placeholder:text-zinc-500
-                outline-none transition
-                focus:border-lime-400
-                focus:ring-2 focus:ring-lime-400/20
-              "
+            className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-zinc-100 transition outline-none placeholder:text-zinc-500 focus:border-lime-400 focus:ring-2 focus:ring-lime-400/20"
             required
           />
         </div>
 
         <div>
-          <label
-            htmlFor="password"
-            className="mb-1 block text-sm font-medium text-zinc-300"
-          >
+          <label htmlFor="password" className="mb-1 block text-sm font-medium text-zinc-300">
             Password
           </label>
 
@@ -90,14 +77,7 @@ export const Remove = () => {
             type="password"
             name="password"
             placeholder="Password"
-            className="
-                w-full rounded-lg border border-zinc-700
-                bg-zinc-800 px-4 py-2 text-zinc-100
-                placeholder:text-zinc-500
-                outline-none transition
-                focus:border-lime-400
-                focus:ring-2 focus:ring-lime-400/20
-              "
+            className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-zinc-100 transition outline-none placeholder:text-zinc-500 focus:border-lime-400 focus:ring-2 focus:ring-lime-400/20"
             required
           />
         </div>
@@ -110,14 +90,7 @@ export const Remove = () => {
               type="text"
               placeholder="Name"
               name="name"
-              className="
-                  w-full rounded-lg border border-zinc-700
-                  bg-zinc-800 px-4 py-2 text-zinc-100
-                  placeholder:text-zinc-500
-                  outline-none transition
-                  focus:border-lime-400
-                  focus:ring-2 focus:ring-lime-400/20
-                "
+              className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-zinc-100 transition outline-none placeholder:text-zinc-500 focus:border-lime-400 focus:ring-2 focus:ring-lime-400/20"
               required
             />
 
@@ -125,14 +98,7 @@ export const Remove = () => {
               type="text"
               placeholder="Tag"
               name="tag"
-              className="
-                  w-28 rounded-lg border border-zinc-700
-                  bg-zinc-800 px-4 py-2 text-zinc-100
-                  placeholder:text-zinc-500
-                  outline-none transition
-                  focus:border-lime-400
-                  focus:ring-2 focus:ring-lime-400/20
-                "
+              className="w-28 rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-zinc-100 transition outline-none placeholder:text-zinc-500 focus:border-lime-400 focus:ring-2 focus:ring-lime-400/20"
               required
             />
           </div>
@@ -140,12 +106,7 @@ export const Remove = () => {
 
         <button
           type="submit"
-          className="
-              w-full rounded-lg bg-lime-400
-              py-2 font-medium text-zinc-950
-              transition hover:bg-lime-300
-              active:scale-[0.99]
-            "
+          className="w-full rounded-lg bg-lime-400 py-2 font-medium text-zinc-950 transition hover:bg-lime-300 active:scale-[0.99]"
         >
           Submit
         </button>

@@ -1,18 +1,8 @@
-import {
-  FetchHttpClient,
-  HttpApp,
-  HttpRouter,
-  HttpServerResponse,
-} from '@effect/platform';
+import { FetchHttpClient, HttpApp, HttpRouter, HttpServerResponse } from '@effect/platform';
 import { Effect } from 'effect';
-import { D1Live, KVLive } from './services';
+import { AILive, D1Live, KVLive } from './services';
 import { makeBasicAuth } from './middlewares';
-import {
-  getPlayers,
-  insertPlayer,
-  removePlayer,
-  scheduled as runScheduled,
-} from './handles';
+import { getPlayers, insertPlayer, removePlayer, scheduled as runScheduled } from './handles';
 import { env } from 'cloudflare:workers';
 
 const playerRoute = HttpRouter.empty.pipe(
@@ -41,7 +31,7 @@ const servo = HttpRouter.empty.pipe(
 );
 
 const scheduled = runScheduled.pipe(
-  Effect.provide([D1Live, KVLive]),
+  Effect.provide([D1Live, KVLive, AILive]),
   Effect.provide(FetchHttpClient.layer),
 );
 

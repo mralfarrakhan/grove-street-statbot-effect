@@ -1,11 +1,24 @@
 import { D1Client } from '@effect/sql-d1';
-import { Array, DateTime, Effect, Match, Option, Order, pipe, Schema } from 'effect';
+import {
+  Array,
+  Console,
+  DateTime,
+  Effect,
+  Match,
+  Option,
+  Order,
+  pipe,
+  Random,
+  Schema,
+} from 'effect';
 import {
   Player,
   AccountV2,
   InsertPlayerSchema,
   RemovePlayerSchema,
   MMRHistoryV2,
+  Agents,
+  AIResponse,
   HookMessage,
 } from './schemas';
 import {
@@ -16,7 +29,7 @@ import {
   HttpServerResponse,
 } from '@effect/platform';
 import { env } from 'cloudflare:workers';
-import { KVClient } from './services';
+import { AIClient, AIError, KVClient } from './services';
 import { SqlResolver } from '@effect/sql';
 import {
   DownRank,
@@ -27,6 +40,14 @@ import {
   UpRank,
   type Report,
 } from './model';
+import {
+  downRankPrompt,
+  firstRankPrompt,
+  promptGenerator,
+  upRankPrompt,
+} from './prompts';
+import he from 'he';
+import mustache from 'mustache';
 
 const dbGetPlayers = D1Client.D1Client.pipe(
   Effect.flatMap(
@@ -174,32 +195,105 @@ const makeGetLatestRankChange =
       Option.getOrElse(() => NoChange()),
     );
 
-const makeBuildReport = (p: Player) => (r: Report) =>
+const llmReportGenerator = <
+  M extends {
+    player: string;
+    new_rank: string;
+    discord_user_id: string;
+  },
+>(
+  prompt: string,
+  agent: string,
+  description: string,
+  run: (prompt: string) => Effect.Effect<Record<string, unknown>, AIError>,
+  view: M,
+  fallback: string,
+) =>
+  pipe(
+    promptGenerator(prompt, agent, description),
+    Effect.succeed,
+    Effect.flatMap(run),
+    Effect.flatMap((v) => Schema.decodeUnknown(AIResponse)(v)),
+    Effect.flatMap((v) => Option.fromNullable(v.choices[0]?.message.content)),
+    Effect.map((v) => mustache.render(v, view)),
+    Effect.tapErrorCause((cause) => Console.log(cause)),
+    Effect.orElseSucceed(() => fallback),
+    Effect.optionFromOptional,
+  );
+
+const makeGetReportConfig = (p: Player) => (r: Report) =>
   pipe(
     r,
     reportMatch({
       NoChange: () => Option.none(),
-      FirstRank: ({ rank }) =>
-        Option.some(
-          `**${p.name}#${p.tag}** has started this season as ${rank}. keep the good work <@${p.discord_user_id}>.`,
-        ),
-      DownRank: ({ newRank }) =>
-        Option.some(
-          `**${p.name}#${p.tag}** has been demoted to ${newRank}. too bad, <@${p.discord_user_id}>.`,
-        ),
-      UpRank: ({ newRank }) =>
-        Option.some(
-          `**${p.name}#${p.tag}** has been promoted to ${newRank}. well done, <@${p.discord_user_id}>.`,
-        ),
       NewSeason: () => Option.none(),
+      FirstRank: ({ rank }) =>
+        Option.some({
+          prompt: firstRankPrompt,
+          rank,
+          fallback: `**${p.name}#${p.tag}** has started this season as ${rank}. keep the good work <@${p.discord_user_id}>.`,
+        }),
+      DownRank: ({ newRank }) =>
+        Option.some({
+          prompt: downRankPrompt,
+          rank: newRank,
+          fallback: `**${p.name}#${p.tag}** has been demoted to ${newRank}. too bad, <@${p.discord_user_id}>.`,
+        }),
+      UpRank: ({ newRank }) =>
+        Option.some({
+          prompt: upRankPrompt,
+          rank: newRank,
+          fallback: `**${p.name}#${p.tag}** has been promoted to ${newRank}. well done, <@${p.discord_user_id}>.`,
+        }),
     }),
-    Option.map((m) =>
-      Schema.decodeUnknown(HookMessage)({
-        content: m,
-        username: 'Sova',
-        avatar_url:
-          'https://media.valorant-api.com/agents/320b2a48-4d9b-a075-30f1-1f93a9b638fa/killfeedportrait.png',
-      }),
+  );
+
+const makeBuildReport = (p: Player) => (r: Report) =>
+  HttpClient.HttpClient.pipe(
+    Effect.flatMap((c) =>
+      HttpClientRequest.get('https://valorant-api.com/v1/agents').pipe(
+        c.execute,
+        Effect.flatMap(HttpClientResponse.schemaBodyJson(Agents)),
+        Effect.flatMap((v) => Random.choice(v.data)),
+      ),
+    ),
+    Effect.flatMap((a) =>
+      AIClient.pipe(
+        Effect.flatMap((ai) =>
+          pipe(
+            r,
+            makeGetReportConfig(p),
+            Option.match({
+              onSome: ({ prompt, rank, fallback }) =>
+                llmReportGenerator(
+                  prompt,
+                  a.displayName,
+                  he.decode(a.description),
+                  ai.run,
+                  {
+                    player: `**${p.name}#${p.tag}**`,
+                    new_rank: rank,
+                    discord_user_id: `<@${p.discord_user_id}>`,
+                  },
+                  fallback,
+                ).pipe(
+                  Effect.flatMap(
+                    Option.map((m) =>
+                      Schema.decodeUnknown(HookMessage)({
+                        content: m,
+                        username: a.displayName,
+                        avatar_url: a.displayIcon.toString(),
+                      }),
+                    ),
+                  ),
+                  Effect.flatten,
+                  Effect.optionFromOptional,
+                ),
+              onNone: () => Effect.succeed(Option.none()),
+            }),
+          ),
+        ),
+      ),
     ),
   );
 
@@ -260,4 +354,5 @@ export const scheduled = dbGetPlayers.pipe(
       { concurrency: 'unbounded' },
     ),
   ),
+  Effect.tap((v) => Console.log(v)),
 );

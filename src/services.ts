@@ -33,3 +33,31 @@ export const KVLive = Layer.succeed(
       }),
   }),
 );
+
+export class AIError extends Data.TaggedError('AIError')<{
+  cause: unknown;
+}> {}
+
+export class AIClient extends Context.Tag('AIClient')<
+  AIClient,
+  {
+    readonly run: (prompt: string) => Effect.Effect<Record<string, unknown>, AIError>;
+  }
+>() {}
+
+export const AILive = Layer.succeed(
+  AIClient,
+  AIClient.of({
+    run: (prompt) =>
+      Effect.tryPromise({
+        try: () =>
+          env.AI.run('@cf/google/gemma-4-26b-a4b-it', {
+            messages: [
+              { role: 'system', content: 'video game enthusiast' },
+              { role: 'user', content: prompt },
+            ],
+          }),
+        catch: (e) => new AIError({ cause: e }),
+      }),
+  }),
+);

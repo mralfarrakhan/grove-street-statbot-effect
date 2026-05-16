@@ -13,10 +13,7 @@ export const Modal = <T,>({ onClose, message }: ModalProps<T>) => (
       </pre>
 
       <div className="flex justify-end gap-2">
-        <button
-          onClick={onClose}
-          className="rounded-lg bg-zinc-800 px-4 py-2 hover:bg-zinc-700"
-        >
+        <button onClick={onClose} className="rounded-lg bg-zinc-800 px-4 py-2 hover:bg-zinc-700">
           Ok
         </button>
       </div>
