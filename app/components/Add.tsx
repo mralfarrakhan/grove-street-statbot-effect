@@ -127,7 +127,7 @@ export const Add = () => {
             htmlFor="discord_user_id"
             className="mb-1 block text-sm font-medium text-zinc-300"
           >
-            Discord Tag
+            Discord User ID
           </label>
 
           <input

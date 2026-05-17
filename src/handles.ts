@@ -53,9 +53,7 @@ const dbGetPlayers = D1Client.D1Client.pipe(
 export const getPlayers = dbGetPlayers.pipe(
   Effect.flatMap(Schema.decode(Schema.Array(Player))),
   Effect.flatMap((players) =>
-    HttpServerResponse.json({
-      players,
-    }),
+    HttpServerResponse.schemaJson(Schema.Array(Player))(players),
   ),
 );
 
@@ -308,7 +306,7 @@ const ensureSorted = (m: MMRHistoryV2) =>
     },
   });
 
-const makeSendReport = (m: HookMessage) =>
+const sendReport = (m: HookMessage) =>
   HttpClient.HttpClient.pipe(
     Effect.zipWith(Schema.encode(HookMessage)(m), (c, msg) =>
       HttpClientRequest.post(env.WEBHOOK_URL).pipe(
@@ -327,9 +325,10 @@ export const scheduled = dbGetPlayers.pipe(
         makeFetchMMRHistoryV2(z).pipe(
           Effect.map(ensureSorted),
           Effect.flatMap(buildCategory),
+          Effect.tap((v) => Console.log(`log ${z.puuid}: ${JSON.stringify(v)}`)),
           Effect.flatMap(makeBuildReport(z)),
           Effect.flatten,
-          Effect.flatMap(makeSendReport),
+          Effect.flatMap(sendReport),
           Effect.either,
         ),
       { concurrency: 'unbounded' },
