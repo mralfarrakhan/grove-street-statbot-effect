@@ -52,9 +52,7 @@ const dbGetPlayers = D1Client.D1Client.pipe(
 
 export const getPlayers = dbGetPlayers.pipe(
   Effect.flatMap(Schema.decode(Schema.Array(Player))),
-  Effect.flatMap((players) =>
-    HttpServerResponse.schemaJson(Schema.Array(Player))(players),
-  ),
+  Effect.flatMap((players) => HttpServerResponse.schemaJson(Schema.Array(Player))(players)),
 );
 
 const enrichAccount =
@@ -157,8 +155,8 @@ const makeGetLatestRankChange = (m: MMRHistoryV2) => (lastMatchId: Option.Option
     (u) => Array.findFirst(u, ([l, r]) => l.tier.id !== r.tier.id),
     Option.flatMap(([l, r]) =>
       Match.value({ v: { l, r } }).pipe(
-        Match.when({ v: ({ l, r }) => l.season.id !== r.season.id }, () => NewSeason()),
         Match.when({ v: ({ r }) => r.tier.id === 0 }, () => FirstRank({ rank: l.tier.name })),
+        Match.when({ v: ({ l, r }) => l.season.id !== r.season.id }, () => NewSeason()),
         Match.when({ v: ({ l, r }) => l.season.id === r.season.id && l.tier.id > r.tier.id }, () =>
           UpRank({
             oldRank: r.tier.name,
@@ -280,18 +278,18 @@ const makeBuildReport = (p: Player) => (r: Report) =>
 
 const buildCategory = (m: MMRHistoryV2) =>
   KVClient.pipe(
-    Effect.flatMap((kv) =>
-      kv
-        .get(m.data.account.puuid)
-        .pipe(
-          Effect.map(makeGetLatestRankChange(m)),
-          Effect.zipLeft(
-            Effect.fromNullable(m.data.history.at(0)).pipe(
-              Effect.flatMap((z) => kv.set(m.data.account.puuid, z.match_id)),
-            ),
-          ),
-        ),
-    ),
+    Effect.flatMap((kv) => kv.get(m.data.account.puuid)),
+    Effect.map(makeGetLatestRankChange(m)),
+  );
+
+const advanceKV = (m: MMRHistoryV2) =>
+  pipe(
+    Option.fromNullable(m.data.history.at(0)),
+    Option.match({
+      onNone: () => Effect.void,
+      onSome: (latest) =>
+        KVClient.pipe(Effect.flatMap((kv) => kv.set(m.data.account.puuid, latest.match_id))),
+    }),
   );
 
 const ensureSorted = (m: MMRHistoryV2) =>
@@ -324,11 +322,18 @@ export const scheduled = dbGetPlayers.pipe(
       (z) =>
         makeFetchMMRHistoryV2(z).pipe(
           Effect.map(ensureSorted),
-          Effect.flatMap(buildCategory),
-          Effect.tap((v) => Console.log(`log ${z.puuid}: ${JSON.stringify(v)}`)),
-          Effect.flatMap(makeBuildReport(z)),
-          Effect.flatten,
-          Effect.flatMap(sendReport),
+          Effect.flatMap((mmr) =>
+            buildCategory(mmr).pipe(
+              Effect.tap((v) => Console.log(`log ${z.puuid}: ${JSON.stringify(v)}`)),
+              Effect.flatMap(makeBuildReport(z)),
+              Effect.flatMap((maybeMsg) =>
+                Option.match(maybeMsg, {
+                  onNone: () => advanceKV(mmr),
+                  onSome: (msg) => sendReport(msg).pipe(Effect.zipRight(advanceKV(mmr))),
+                }),
+              ),
+            ),
+          ),
           Effect.either,
         ),
       { concurrency: 'unbounded' },
