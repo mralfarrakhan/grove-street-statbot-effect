@@ -147,7 +147,7 @@ const makeGetLatestRankChange = (m: MMRHistoryV2) => (lastMatchId: Option.Option
       onSome: (lastMatchId) =>
         pipe(
           Array.findFirstIndex(m.data.history, (x) => x.match_id === lastMatchId),
-          Option.map((l) => Array.take(m.data.history, l)),
+          Option.map((l) => Array.take(m.data.history, l + 1)),
           Option.getOrElse(() => [...m.data.history]),
         ),
     }),
@@ -228,22 +228,23 @@ const makeGetReportConfig = (p: Player) => (r: Report) =>
   );
 
 const makeBuildReport = (p: Player) => (r: Report) =>
-  HttpClient.HttpClient.pipe(
-    Effect.flatMap((c) =>
-      HttpClientRequest.get('https://valorant-api.com/v1/agents').pipe(
-        c.execute,
-        Effect.flatMap(HttpClientResponse.schemaBodyJson(Agents)),
-        Effect.flatMap((v) => Random.choice(v.data)),
-      ),
-    ),
-    Effect.flatMap((a) =>
-      AIClient.pipe(
-        Effect.flatMap((ai) =>
-          pipe(
-            r,
-            makeGetReportConfig(p),
-            Option.match({
-              onSome: ({ prompt, rank, fallback }) =>
+  pipe(
+    r,
+    makeGetReportConfig(p),
+    Option.match({
+      onNone: () => Effect.succeed(Option.none<HookMessage>()),
+      onSome: ({ prompt, rank, fallback }) =>
+        HttpClient.HttpClient.pipe(
+          Effect.flatMap((c) =>
+            HttpClientRequest.get('https://valorant-api.com/v1/agents').pipe(
+              c.execute,
+              Effect.flatMap(HttpClientResponse.schemaBodyJson(Agents)),
+              Effect.flatMap((v) => Random.choice(v.data)),
+            ),
+          ),
+          Effect.flatMap((a) =>
+            AIClient.pipe(
+              Effect.flatMap((ai) =>
                 llmReportGenerator(
                   prompt,
                   a.displayName,
@@ -268,12 +269,11 @@ const makeBuildReport = (p: Player) => (r: Report) =>
                   Effect.flatten,
                   Effect.optionFromOptional,
                 ),
-              onNone: () => Effect.succeed(Option.none()),
-            }),
+              ),
+            ),
           ),
         ),
-      ),
-    ),
+    }),
   );
 
 const buildCategory = (m: MMRHistoryV2) =>
@@ -310,6 +310,7 @@ const sendReport = (m: HookMessage) =>
       HttpClientRequest.post(env.WEBHOOK_URL).pipe(
         HttpClientRequest.bodyJson(msg),
         Effect.flatMap(c.execute),
+        Effect.flatMap(HttpClientResponse.filterStatusOk),
       ),
     ),
     Effect.flatten,
@@ -324,7 +325,7 @@ export const scheduled = dbGetPlayers.pipe(
           Effect.map(ensureSorted),
           Effect.flatMap((mmr) =>
             buildCategory(mmr).pipe(
-              Effect.tap((v) => Console.log(`log ${z.puuid}: ${JSON.stringify(v)}`)),
+              Effect.tap((v) => Console.log(JSON.stringify({ event: 'rank_check', puuid: z.puuid, report: v }))),
               Effect.flatMap(makeBuildReport(z)),
               Effect.flatMap((maybeMsg) =>
                 Option.match(maybeMsg, {
@@ -339,5 +340,5 @@ export const scheduled = dbGetPlayers.pipe(
       { concurrency: 'unbounded' },
     ),
   ),
-  Effect.tapErrorCause((c) => Console.error('scheduled err', JSON.stringify(c))),
+  Effect.tapErrorCause((c) => Console.error(JSON.stringify({ event: 'scheduled_error', cause: c.toJSON() }))),
 );
