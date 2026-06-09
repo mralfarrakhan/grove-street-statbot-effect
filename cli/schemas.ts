@@ -54,3 +54,16 @@ export const ApplicationCommand = Schema.Struct({
 
 export type ApplicationCommandOption = typeof ApplicationCommandOption.Type;
 export type ApplicationCommand = typeof ApplicationCommand.Type;
+
+export const ApplicationCommandInput = Schema.Struct({
+  name: Schema.String,
+  description: Schema.String,
+  type: Schema.optional(Schema.Number),
+  options: Schema.optional(Schema.Array(ApplicationCommandOption)),
+  default_member_permissions: Schema.optional(Schema.NullOr(Schema.String)),
+  nsfw: Schema.optional(Schema.Boolean),
+  integration_types: Schema.optional(Schema.Array(Schema.Number)),
+  contexts: Schema.optional(Schema.Array(Schema.NullOr(Schema.Number))),
+});
+
+export type ApplicationCommandInput = typeof ApplicationCommandInput.Type;
