@@ -59,11 +59,16 @@ export const Add = () => {
 
   return (
     <>
-      {errorOpen && <Modal onClose={() => setErrorOpen(false)} message={errorMessage} isError />}
+      {errorOpen && (
+        <Modal onClose={() => setErrorOpen(false)} message={errorMessage} isError />
+      )}
       {okOpen && <Modal onClose={() => setOkOpen(false)} message={okMessage} />}
       <form className="space-y-4" onSubmit={handleSubmit}>
         <div>
-          <label htmlFor="username" className="mb-1 block text-sm font-medium text-zinc-300">
+          <label
+            htmlFor="username"
+            className="mb-1 block text-sm font-medium text-zinc-300"
+          >
             Username
           </label>
 
@@ -78,7 +83,10 @@ export const Add = () => {
         </div>
 
         <div>
-          <label htmlFor="password" className="mb-1 block text-sm font-medium text-zinc-300">
+          <label
+            htmlFor="password"
+            className="mb-1 block text-sm font-medium text-zinc-300"
+          >
             Password
           </label>
 
@@ -115,7 +123,10 @@ export const Add = () => {
         </div>
 
         <div>
-          <label htmlFor="discord_user_id" className="mb-1 block text-sm font-medium text-zinc-300">
+          <label
+            htmlFor="discord_user_id"
+            className="mb-1 block text-sm font-medium text-zinc-300"
+          >
             Discord User ID
           </label>
 

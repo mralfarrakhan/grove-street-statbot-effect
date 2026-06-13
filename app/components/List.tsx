@@ -53,7 +53,8 @@ export const List = () => {
           <thead className="border-b border-zinc-700 bg-zinc-900 text-xs font-semibold tracking-wider text-zinc-400 uppercase">
             <tr>
               <th scope="col" className="px-6 py-4">
-                Player <span className="font-normal text-lime-400/70 lowercase">(name#tag)</span>
+                Player{' '}
+                <span className="font-normal text-lime-400/70 lowercase">(name#tag)</span>
               </th>
               <th scope="col" className="px-6 py-4 font-mono tracking-normal">
                 PUUID
@@ -69,7 +70,10 @@ export const List = () => {
               </tr>
             ) : (
               players.map((player) => (
-                <tr key={player.puuid} className="group transition-colors hover:bg-zinc-700/30">
+                <tr
+                  key={player.puuid}
+                  className="group transition-colors hover:bg-zinc-700/30"
+                >
                   <td className="px-6 py-4 font-medium text-zinc-100 transition-colors group-hover:text-lime-400">
                     {player.name}
                     <span className="ml-0.5 font-normal text-zinc-500 transition-colors group-hover:text-lime-500/60">
