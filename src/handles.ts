@@ -20,6 +20,7 @@ import {
   Agents,
   AIResponse,
   HookMessage,
+  MMRHistoryV2Account,
 } from './schemas';
 import {
   HttpClient,
@@ -340,32 +341,78 @@ const sendReport = (m: HookMessage) =>
     Effect.flatten,
   );
 
+const makeReporting =
+  (z: Player) =>
+  <E, R>(mmr: Effect.Effect<MMRHistoryV2, E, R>) =>
+    mmr.pipe(
+      Effect.map(ensureSorted),
+      Effect.flatMap((mmr) =>
+        buildCategory(mmr).pipe(
+          Effect.tap((v) =>
+            Console.log(
+              JSON.stringify({ event: 'rank_check', puuid: z.puuid, report: v }),
+            ),
+          ),
+          Effect.flatMap(makeBuildReport(z)),
+          Effect.flatMap((maybeMsg) =>
+            Option.match(maybeMsg, {
+              onNone: () => advanceKV(mmr),
+              onSome: (msg) => sendReport(msg).pipe(Effect.zipRight(advanceKV(mmr))),
+            }),
+          ),
+        ),
+      ),
+      Effect.either,
+    );
+
+const makeUpdateAccount = (account: MMRHistoryV2Account) =>
+  D1Client.D1Client.pipe(
+    Effect.flatMap(
+      (v) =>
+        v<Player>`SELECT puuid, name, tag, discord_user_id FROM players WHERE puuid = ${account.puuid}`,
+    ),
+    Effect.flatMap(Schema.decode(Schema.Array(Player))),
+    Effect.flatMap(Array.head),
+    Effect.flatMap((p) => {
+      const nameChanged = p.name !== account.name;
+      const tagChanged = p.tag !== account.tag;
+
+      if (!nameChanged && !tagChanged) return Effect.void;
+
+      return D1Client.D1Client.pipe(
+        Effect.flatMap(
+          (v) =>
+            v`UPDATE players SET name = ${account.name}, tag = ${account.tag} WHERE puuid = ${account.puuid}`,
+        ),
+        Effect.tap(
+          Console.log(
+            JSON.stringify({
+              message: 'Player identity updated',
+              puuid: account.puuid,
+              from: `${p.name}#${p.tag}`,
+              to: `${account.name}#${account.tag}`,
+            }),
+          ),
+        ),
+      );
+    }),
+  );
+
 export const scheduled = dbGetPlayers.pipe(
   Effect.flatMap((v) =>
     Effect.forEach(
       v,
       (z) =>
-        makeFetchMMRHistoryV2(z).pipe(
-          Effect.map(ensureSorted),
-          Effect.flatMap((mmr) =>
-            buildCategory(mmr).pipe(
-              Effect.tap((v) =>
-                Console.log(
-                  JSON.stringify({ event: 'rank_check', puuid: z.puuid, report: v }),
-                ),
-              ),
-              Effect.flatMap(makeBuildReport(z)),
-              Effect.flatMap((maybeMsg) =>
-                Option.match(maybeMsg, {
-                  onNone: () => advanceKV(mmr),
-                  onSome: (msg) => sendReport(msg).pipe(Effect.zipRight(advanceKV(mmr))),
-                }),
-              ),
-            ),
+        makeFetchMMRHistoryV2(z).pipe((x) =>
+          Effect.zipLeft(
+            x.pipe(makeReporting(z)),
+            x.pipe(Effect.flatMap(({ data }) => makeUpdateAccount(data.account))),
+            { concurrent: true },
           ),
-          Effect.either,
         ),
-      { concurrency: 'unbounded' },
+      {
+        concurrency: 'unbounded',
+      },
     ),
   ),
   Effect.tapErrorCause((c) =>

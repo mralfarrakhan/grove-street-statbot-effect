@@ -64,9 +64,17 @@ const MMRHistoryV2HistorySchema = Schema.Struct({
 
 export type MMRHistoryV2History = typeof MMRHistoryV2HistorySchema.Type;
 
+export class MMRHistoryV2Account extends Schema.Class<MMRHistoryV2Account>(
+  'MMRHistoryV2Account',
+)({
+  name: Schema.String,
+  tag: Schema.String,
+  puuid: Schema.UUID,
+}) {}
+
 export class MMRHistoryV2 extends BaseResponse.extend<MMRHistoryV2>('MMRHistory')({
   data: Schema.Struct({
-    account: Schema.Struct(Struct.pick(Player.fields, 'name', 'tag', 'puuid')),
+    account: MMRHistoryV2Account,
     history: Schema.Array(MMRHistoryV2HistorySchema),
   }),
 }) {}

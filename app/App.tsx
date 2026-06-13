@@ -14,9 +14,7 @@ export const App = () => {
             type="button"
             onClick={() => setTab('add')}
             className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-colors duration-200 ${
-              tab === 'add'
-                ? 'bg-lime-400 text-zinc-950'
-                : 'text-zinc-400 hover:text-zinc-100'
+              tab === 'add' ? 'bg-lime-400 text-zinc-950' : 'text-zinc-400 hover:text-zinc-100'
             } `}
           >
             Add
@@ -26,9 +24,7 @@ export const App = () => {
             type="button"
             onClick={() => setTab('list')}
             className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-colors duration-200 ${
-              tab === 'list'
-                ? 'bg-lime-400 text-zinc-950'
-                : 'text-zinc-400 hover:text-zinc-100'
+              tab === 'list' ? 'bg-lime-400 text-zinc-950' : 'text-zinc-400 hover:text-zinc-100'
             } `}
           >
             List
@@ -38,9 +34,7 @@ export const App = () => {
             type="button"
             onClick={() => setTab('remove')}
             className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-colors duration-200 ${
-              tab === 'remove'
-                ? 'bg-lime-400 text-zinc-950'
-                : 'text-zinc-400 hover:text-zinc-100'
+              tab === 'remove' ? 'bg-lime-400 text-zinc-950' : 'text-zinc-400 hover:text-zinc-100'
             } `}
           >
             Remove
