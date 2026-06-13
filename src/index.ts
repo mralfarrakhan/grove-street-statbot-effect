@@ -2,7 +2,7 @@ import { FetchHttpClient, HttpApp, HttpRouter, HttpServerResponse } from '@effec
 import { Effect } from 'effect';
 import { AILive, D1Live, KVLive } from './services';
 import { makeBasicAuth } from './middlewares';
-import { getPlayers, insertPlayer, removePlayer, scheduled as runScheduled } from './handles';
+import { getPlayers, handleInteraction, insertPlayer, removePlayer, scheduled as runScheduled } from './handles';
 import { env } from 'cloudflare:workers';
 
 const playerRoute = HttpRouter.empty.pipe(
@@ -19,6 +19,7 @@ const api = HttpRouter.empty.pipe(
 
 const servo = HttpRouter.empty.pipe(
   HttpRouter.mount('/api', api),
+  HttpRouter.post('/interactions', handleInteraction),
   Effect.catchTags({
     RouteNotFound: () => HttpServerResponse.text('Not Found', { status: 404 }),
     Unauthorized: () => HttpServerResponse.empty({ status: 401 }),

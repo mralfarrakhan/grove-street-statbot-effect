@@ -96,3 +96,12 @@ export class AIChoice extends Schema.Class<AIChoice>('AIChoice')({
 export class AIResponse extends Schema.Class<AIResponse>('AIResponse')({
   choices: Schema.Array(AIChoice),
 }) {}
+
+export class InteractionData extends Schema.Class<InteractionData>('InteractionData')({
+  name: Schema.String,
+}) {}
+
+export class Interaction extends Schema.Class<Interaction>('Interaction')({
+  type: Schema.Number,
+  data: Schema.optional(InteractionData),
+}) {}

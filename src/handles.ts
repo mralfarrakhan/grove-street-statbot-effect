@@ -1,4 +1,6 @@
 import { D1Client } from '@effect/sql-d1';
+import { verifyKey, InteractionType, InteractionResponseType } from 'discord-interactions';
+import { Unauthorized } from '@effect/platform/HttpApiError';
 import {
   Array,
   Console,
@@ -20,6 +22,7 @@ import {
   Agents,
   AIResponse,
   HookMessage,
+  Interaction,
 } from './schemas';
 import {
   HttpClient,
@@ -371,4 +374,64 @@ export const scheduled = dbGetPlayers.pipe(
   Effect.tapErrorCause((c) =>
     Console.error(JSON.stringify({ event: 'scheduled_error', cause: c.toJSON() })),
   ),
+);
+
+const listInteraction = dbGetPlayers.pipe(
+  Effect.flatMap(Schema.decode(Schema.Array(Player))),
+  Effect.flatMap((players) =>
+    HttpServerResponse.json({
+      type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+      data: {
+        embeds: [
+          {
+            title: `Registered Players (${players.length})`,
+            description:
+              players.length === 0
+                ? 'No players registered.'
+                : players
+                    .map((p) =>
+                      p.discord_user_id
+                        ? `• **${p.name}#${p.tag}** — <@${p.discord_user_id}>`
+                        : `• **${p.name}#${p.tag}**`,
+                    )
+                    .join('\n'),
+            color: 0x58b9ff,
+          },
+        ],
+      },
+    }),
+  ),
+);
+
+const dispatchInteraction = (interaction: Interaction) => {
+  if (interaction.type === InteractionType.PING) {
+    return HttpServerResponse.json({ type: InteractionResponseType.PONG });
+  }
+  if (
+    interaction.type === InteractionType.APPLICATION_COMMAND &&
+    interaction.data?.name === 'list'
+  ) {
+    return listInteraction;
+  }
+  return HttpServerResponse.json({ type: InteractionResponseType.PONG });
+};
+
+export const handleInteraction = HttpServerRequest.HttpServerRequest.pipe(
+  Effect.flatMap((req) => {
+    const sig = req.headers['x-signature-ed25519'] ?? '';
+    const ts = req.headers['x-signature-timestamp'] ?? '';
+    return req.text.pipe(
+      Effect.flatMap((rawBody) =>
+        Effect.promise(() => verifyKey(rawBody, sig, ts, env.BOT_PUBLIC_KEY)).pipe(
+          Effect.filterOrFail(
+            (valid) => valid,
+            () => new Unauthorized(),
+          ),
+          Effect.as(rawBody),
+        ),
+      ),
+      Effect.flatMap(Schema.decodeUnknown(Schema.parseJson(Interaction))),
+      Effect.flatMap(dispatchInteraction),
+    );
+  }),
 );

@@ -12,7 +12,7 @@ import { ApplicationCommand, ApplicationCommandInput } from './schemas.ts';
 import { formatCommands } from './format.ts';
 
 const BOT_TOKEN = process.env['BOT_TOKEN'] ?? '';
-const APPLICATION_ID = process.env['APPLICATION_ID'] ?? '';
+const BOT_APPLICATION_ID = process.env['BOT_APPLICATION_ID'] ?? '';
 
 const makeHeaders = {
   Authorization: `Bot ${BOT_TOKEN}`,
@@ -24,7 +24,7 @@ const makeHeaders = {
 const fetchCommands = HttpClient.HttpClient.pipe(
   Effect.flatMap((c) =>
     HttpClientRequest.get(
-      `https://discord.com/api/v10/applications/${APPLICATION_ID}/commands`,
+      `https://discord.com/api/v10/applications/${BOT_APPLICATION_ID}/commands`,
     ).pipe(
       HttpClientRequest.setHeaders(makeHeaders),
       c.execute,
@@ -47,7 +47,7 @@ const putCommands = Command.make(
         return HttpClient.HttpClient.pipe(
           Effect.flatMap((c) =>
             HttpClientRequest.put(
-              `https://discord.com/api/v10/applications/${APPLICATION_ID}/commands`,
+              `https://discord.com/api/v10/applications/${BOT_APPLICATION_ID}/commands`,
             ).pipe(
               HttpClientRequest.setHeaders(makeHeaders),
               HttpClientRequest.bodyJson(body),

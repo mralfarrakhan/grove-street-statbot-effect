@@ -1,13 +1,1 @@
-{
-  "root": [
-    "./worker-configuration.d.ts",
-    "./src/handles.ts",
-    "./src/index.ts",
-    "./src/middlewares.ts",
-    "./src/model.ts",
-    "./src/prompts.ts",
-    "./src/schemas.ts",
-    "./src/services.ts"
-  ],
-  "version": "6.0.3"
-}
+{"root":["./worker-configuration.d.ts","./src/handles.ts","./src/index.ts","./src/middlewares.ts","./src/model.ts","./src/prompts.ts","./src/schemas.ts","./src/services.ts"],"version":"6.0.3"}
