@@ -25,5 +25,8 @@ export const makeBasicAuth = (username: string, password: string) =>
       Effect.flatMap((authStr) => parseAuthString(authStr, username, password)),
       Effect.tap((v) => v),
       Effect.zipRight(app),
+      Effect.catchTag('NoSuchElementException', () =>
+        Effect.fail(new Unauthorized()),
+      ),
     ),
   );

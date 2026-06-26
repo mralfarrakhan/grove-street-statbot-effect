@@ -1,5 +1,5 @@
 import { FetchHttpClient, HttpApp, HttpRouter, HttpServerResponse } from '@effect/platform';
-import { Effect } from 'effect';
+import { Console, Effect } from 'effect';
 import { AILive, D1Live, KVLive } from './services';
 import { makeBasicAuth } from './middlewares';
 import { getPlayers, handleInteraction, insertPlayer, removePlayer, scheduled as runScheduled } from './handles';
@@ -25,7 +25,11 @@ const servo = HttpRouter.empty.pipe(
     Unauthorized: () => HttpServerResponse.empty({ status: 401 }),
   }),
   Effect.catchAllCause((cause) =>
-    HttpServerResponse.json({ message: cause.toJSON() }, { status: 500 }),
+    Console.error(JSON.stringify({ event: 'internal_error', cause: cause.toJSON() })).pipe(
+      Effect.zipRight(
+        HttpServerResponse.json({ message: 'Internal Server Error' }, { status: 500 }),
+      ),
+    ),
   ),
   Effect.provide([D1Live, FetchHttpClient.layer]),
   HttpApp.toWebHandler,

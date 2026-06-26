@@ -123,6 +123,7 @@ export const insertPlayer = HttpServerRequest.schemaBodyJson(InsertPlayerSchema)
   Effect.map(() => HttpServerResponse.empty({ status: 201 })),
   Effect.catchTags({
     RequestError: (c) => HttpServerResponse.json({ message: c.message }, { status: 400 }),
+    ParseError: (c) => HttpServerResponse.json({ message: c.message }, { status: 400 }),
   }),
 );
 
@@ -139,6 +140,7 @@ export const removePlayer = HttpServerRequest.schemaBodyJson(RemovePlayerSchema)
   Effect.map(() => HttpServerResponse.empty({ status: 201 })),
   Effect.catchTags({
     ParseError: (c) => HttpServerResponse.json({ message: c.message }, { status: 400 }),
+    RequestError: (c) => HttpServerResponse.json({ message: c.message }, { status: 400 }),
   }),
 );
 
@@ -435,6 +437,26 @@ export const handleInteraction = HttpServerRequest.HttpServerRequest.pipe(
       ),
       Effect.flatMap(Schema.decodeUnknown(Schema.parseJson(Interaction))),
       Effect.flatMap(dispatchInteraction),
+      Effect.tapErrorCause((cause) =>
+        Console.error(
+          JSON.stringify({ event: 'interaction_error', cause: cause.toJSON() }),
+        ),
+      ),
+      Effect.catchTags({
+        ParseError: () =>
+          HttpServerResponse.json({ message: 'Invalid request body' }, { status: 400 }),
+        RequestError: () =>
+          HttpServerResponse.json(
+            { message: 'Cannot read request body' },
+            { status: 400 },
+          ),
+      }),
+      Effect.catchAllDefect(() =>
+        HttpServerResponse.json(
+          { message: 'Internal Server Error' },
+          { status: 500 },
+        ),
+      ),
     );
   }),
 );
