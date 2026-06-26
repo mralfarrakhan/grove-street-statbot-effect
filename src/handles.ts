@@ -413,7 +413,10 @@ const dispatchInteraction = (interaction: Interaction) => {
   ) {
     return listInteraction;
   }
-  return HttpServerResponse.json({ type: InteractionResponseType.PONG });
+  return HttpServerResponse.json({
+    type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+    data: { content: 'Unknown command.', flags: 1 << 6 },
+  });
 };
 
 export const handleInteraction = HttpServerRequest.HttpServerRequest.pipe(

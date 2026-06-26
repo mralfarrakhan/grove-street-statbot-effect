@@ -1,0 +1,7 @@
+[
+  {
+    "name": "list",
+    "description": "List all registered Valorant players on the watchlist",
+    "type": 1
+  }
+]
