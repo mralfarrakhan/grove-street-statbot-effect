@@ -14,10 +14,7 @@
   "compatibility_flags": ["nodejs_compat"],
   "triggers": {
     "crons": [
-      "*/30 11-16 * * *",
-      "*/30 17-19 * * *",
-      "0 20-22/2 * * *",
-      "0 0-10/2 * * *",
+      "*/30 * * * *",
     ],
   },
   "kv_namespaces": [
