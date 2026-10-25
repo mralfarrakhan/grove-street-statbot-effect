@@ -46,6 +46,7 @@ import {
 } from './model';
 import { getAgentPersona } from './personas';
 import { fetchPlayerMatchPerformance } from './match';
+import { logStructuredError } from './logger';
 import {
   type PartnerPromptContext,
   buildCommanderRefundPrompt,
@@ -448,6 +449,9 @@ const sendReport = (m: HookMessage) =>
       ),
     ),
     Effect.flatten,
+    Effect.tapErrorCause((c) =>
+      logStructuredError('discord_webhook_failure', c, { username: m.username }),
+    ),
   );
 
 const makeReporting =
@@ -457,9 +461,6 @@ const makeReporting =
       Effect.map(ensureSorted),
       Effect.flatMap((mmr) =>
         buildCategory(mmr).pipe(
-          Effect.tap((v) =>
-            Console.log(JSON.stringify({ event: 'rank_check', puuid: z.puuid, report: v })),
-          ),
           Effect.flatMap(makeBuildReport(z)),
           Effect.flatMap((maybeMsg) =>
             Option.match(maybeMsg, {
@@ -518,14 +519,10 @@ export const scheduled = dbGetPlayers.pipe(
               { concurrent: true },
             ),
           Effect.catchAllCause((cause) =>
-            Console.error(
-              JSON.stringify({
-                event: 'player_processing_error',
-                puuid: z.puuid,
-                name: `${z.name}#${z.tag}`,
-                cause: cause.toJSON(),
-              }),
-            ),
+            logStructuredError('player_cron_failure', cause, {
+              puuid: z.puuid,
+              player: `${z.name}#${z.tag}`,
+            }),
           ),
         ),
       {
@@ -533,7 +530,5 @@ export const scheduled = dbGetPlayers.pipe(
       },
     ),
   ),
-  Effect.tapErrorCause((c) =>
-    Console.error(JSON.stringify({ event: 'scheduled_error', cause: c.toJSON() })),
-  ),
+  Effect.tapErrorCause((c) => logStructuredError('scheduled_cron_failure', c)),
 );

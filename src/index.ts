@@ -4,6 +4,7 @@ import { AILive, D1Live, KVLive } from './services';
 import { makeBasicAuth } from './middlewares';
 import { getPlayers, insertPlayer, removePlayer, scheduled as runScheduled } from './handles';
 import { env } from 'cloudflare:workers';
+import { logStructuredError } from './logger';
 
 const playerRoute = HttpRouter.empty.pipe(
   HttpRouter.put('/', insertPlayer),
@@ -24,7 +25,17 @@ const servo = HttpRouter.empty.pipe(
     Unauthorized: () => HttpServerResponse.empty({ status: 401 }),
   }),
   Effect.catchAllCause((cause) =>
-    HttpServerResponse.json({ message: cause.toJSON() }, { status: 500 }),
+    logStructuredError('api_unhandled_failure', cause).pipe(
+      Effect.zipRight(
+        HttpServerResponse.json(
+          {
+            error: 'Internal Server Error',
+            message: 'An unexpected error occurred while processing the request',
+          },
+          { status: 500 },
+        ),
+      ),
+    ),
   ),
   Effect.provide([D1Live, FetchHttpClient.layer]),
   HttpApp.toWebHandler,
