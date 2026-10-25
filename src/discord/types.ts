@@ -75,7 +75,8 @@ export const formatProgressBar = (currentRR: number, maxRR: number = 100): strin
   return `[${'█'.repeat(filledBars)}${'░'.repeat(emptyBars)}] ${currentRR}/${maxRR} RR`;
 };
 
-export const getTierColor = (tierName: string): number => {
+export const getTierColor = (tierName?: string): number => {
+  if (!tierName) return 0x0f1923;
   const name = tierName.toLowerCase();
   if (name.includes('iron')) return 0x5a5959;
   if (name.includes('bronze')) return 0xa5855e;

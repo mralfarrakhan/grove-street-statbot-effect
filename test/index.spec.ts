@@ -23,7 +23,14 @@ import {
   InteractionType,
   InteractionResponseType,
 } from '../src/discord/types';
-import { handleLinkCommand, handleListCommand, handleRankCommand } from '../src/discord/commands';
+import {
+  handleLinkCommand,
+  handleListCommand,
+  handleRankCommand,
+  handleRemoveCommand,
+  handleUnlinkCommand,
+  resolveTargetPlayers,
+} from '../src/discord/commands';
 import { D1Client } from '@effect/sql-d1';
 
 const IncomingRequest = Request<unknown, IncomingRequestCfProperties>;
@@ -498,7 +505,7 @@ describe('Discord Cryptography & Signature Verification', () => {
 });
 
 describe('Discord Slash Command Handlers', () => {
-  const dummyD1 = Layer.succeed(D1Client.D1Client, ((query: unknown, ...args: unknown[]) => {
+  const dummyD1 = Layer.succeed(D1Client.D1Client, ((_query: unknown, ..._args: unknown[]) => {
     return Effect.succeed([
       { puuid: 'p1', name: 'PlayerOne', tag: '1234', discord_user_id: '111' },
       { puuid: 'p2', name: 'PlayerTwo', tag: '5678', discord_user_id: null },
@@ -562,5 +569,261 @@ describe('Discord Slash Command Handlers', () => {
 
     expect(response.data?.content).toContain('Discord Account Not Linked');
     expect(response.data?.content).toContain('/link riot_id: Name#Tag');
+  });
+
+  it('resolveTargetPlayers resolves mentions, riot IDs, and caller fallback', async () => {
+    const mockDb = [
+      { puuid: 'p1', name: 'MainAcc', tag: '1001', discord_user_id: '111111' },
+      { puuid: 'p2', name: 'AltAcc', tag: '2002', discord_user_id: '111111' },
+      { puuid: 'p3', name: 'OtherGuy', tag: '3003', discord_user_id: '222222' },
+    ];
+
+    const mockD1 = Layer.succeed(D1Client.D1Client, ((query: any, ...params: any[]) => {
+      const sql = typeof query === 'string' ? query : Array.isArray(query) ? query.join('?') : '';
+      if (sql.includes('discord_user_id =')) {
+        const id = params[0] || '';
+        return Effect.succeed(mockDb.filter((p) => p.discord_user_id === id));
+      }
+      if (sql.includes('LOWER(name) = LOWER(?) AND LOWER(tag) = LOWER(?)')) {
+        const name = params[0]?.toLowerCase();
+        const tag = params[1]?.toLowerCase();
+        return Effect.succeed(
+          mockDb.filter((p) => p.name.toLowerCase() === name && p.tag.toLowerCase() === tag),
+        );
+      }
+      return Effect.succeed(mockDb);
+    }) as unknown as D1Client.D1Client);
+
+    // 1. Mention resolution
+    const mentionInteraction = {
+      id: 'i-mention',
+      type: InteractionType.APPLICATION_COMMAND,
+      token: 'tok',
+      user: { id: 'caller1' },
+      data: { id: 'c', name: 'rank' },
+    };
+    const resMention = await Effect.runPromise(
+      resolveTargetPlayers(mentionInteraction, '<@111111>').pipe(Effect.provide(mockD1)),
+    );
+    expect(resMention).toHaveLength(2);
+    expect(resMention[0]?.name).toBe('MainAcc');
+    expect(resMention[1]?.name).toBe('AltAcc');
+
+    // 2. Exact Riot ID resolution
+    const resRiotId = await Effect.runPromise(
+      resolveTargetPlayers(mentionInteraction, 'OtherGuy#3003').pipe(Effect.provide(mockD1)),
+    );
+    expect(resRiotId).toHaveLength(1);
+    expect(resRiotId[0]?.name).toBe('OtherGuy');
+
+    // 3. Caller fallback when no playerOption
+    const callerInteraction = {
+      id: 'i-caller',
+      type: InteractionType.APPLICATION_COMMAND,
+      token: 'tok',
+      user: { id: '111111' },
+      data: { id: 'c', name: 'rank' },
+    };
+    const resCaller = await Effect.runPromise(
+      resolveTargetPlayers(callerInteraction).pipe(Effect.provide(mockD1)),
+    );
+    expect(resCaller).toHaveLength(2);
+  });
+
+  it('handleRankCommand displays highest-ranked account when member has multiple accounts', async () => {
+    const mockAccounts = [
+      { puuid: 'p-silver', name: 'SilverMain', tag: '1111', discord_user_id: 'userMulti' },
+      { puuid: 'p-gold', name: 'GoldSmurf', tag: '2222', discord_user_id: 'userMulti' },
+    ];
+
+    const mockD1 = Layer.succeed(D1Client.D1Client, ((_query: any, ..._params: any[]) => {
+      return Effect.succeed(mockAccounts);
+    }) as unknown as D1Client.D1Client);
+
+    const mockKV = Layer.succeed(KVClient, {
+      get: (key: string) => {
+        if (key.includes('p-silver')) {
+          return Effect.succeed(
+            Option.some(
+              JSON.stringify({
+                tierName: 'Silver 1',
+                tierId: 9,
+                rr: 45,
+                elo: 645,
+                lastChange: 15,
+                map: 'Ascent',
+                matchId: 'm1',
+                streakType: 'win',
+                streakCount: 2,
+              }),
+            ),
+          );
+        }
+        if (key.includes('p-gold')) {
+          return Effect.succeed(
+            Option.some(
+              JSON.stringify({
+                tierName: 'Gold 2',
+                tierId: 13,
+                rr: 88,
+                elo: 1088,
+                lastChange: 20,
+                map: 'Haven',
+                matchId: 'm2',
+                streakType: 'win',
+                streakCount: 3,
+              }),
+            ),
+          );
+        }
+        return Effect.succeed(Option.none());
+      },
+      set: () => Effect.void,
+      delete: () => Effect.void,
+    });
+
+    const dummyHttp = Layer.succeed(HttpClient.HttpClient, {} as unknown as HttpClient.HttpClient);
+
+    const interaction = {
+      id: 'i-rank-multi',
+      type: InteractionType.APPLICATION_COMMAND,
+      token: 'tok',
+      user: { id: 'userMulti' },
+      data: { id: 'c-rank', name: 'rank' },
+    };
+
+    const response = await Effect.runPromise(
+      handleRankCommand(interaction).pipe(
+        Effect.provide(Layer.mergeAll(mockD1, dummyHttp, mockKV)),
+      ),
+    );
+
+    expect(response.type).toBe(InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE);
+    const embed = response.data?.embeds?.[0];
+    expect(embed?.title).toContain('GoldSmurf#2222');
+    expect(embed?.fields?.[0]?.value).toContain('Gold 2');
+    expect(embed?.footer?.text).toContain('Also tracking: SilverMain#1111 (Silver 1)');
+  });
+
+  it('handleUnlinkCommand guides user when multiple accounts are linked without specific player option', async () => {
+    const mockAccounts = [
+      { puuid: 'p1', name: 'MainAcc', tag: '1001', discord_user_id: 'userX' },
+      { puuid: 'p2', name: 'AltAcc', tag: '2002', discord_user_id: 'userX' },
+    ];
+
+    const mockD1 = Layer.succeed(D1Client.D1Client, ((query: any, ..._params: any[]) => {
+      const sql = typeof query === 'string' ? query : Array.isArray(query) ? query.join('?') : '';
+      if (sql.includes('SELECT')) {
+        return Effect.succeed(mockAccounts);
+      }
+      return Effect.succeed([]);
+    }) as unknown as D1Client.D1Client);
+
+    const interaction = {
+      id: 'i-unlink',
+      type: InteractionType.APPLICATION_COMMAND,
+      token: 'tok',
+      user: { id: 'userX' },
+      data: { id: 'c-unlink', name: 'unlink' },
+    };
+
+    const response = await Effect.runPromise(
+      handleUnlinkCommand(interaction).pipe(Effect.provide(mockD1)),
+    );
+
+    expect(response.data?.content).toContain('You have **2 accounts** linked');
+    expect(response.data?.content).toContain('/unlink player: MainAcc#1001');
+    expect(response.data?.content).toContain('/unlink player: AltAcc#2002');
+  });
+
+  it('handleUnlinkCommand unlinks target alt account successfully', async () => {
+    let deletedPuuid = '';
+    const mockD1 = Layer.succeed(D1Client.D1Client, ((query: any, ...params: any[]) => {
+      const sql = typeof query === 'string' ? query : Array.isArray(query) ? query.join('?') : '';
+      if (sql.includes('SELECT')) {
+        return Effect.succeed([
+          { puuid: 'p-alt', name: 'AltAcc', tag: '2002', discord_user_id: 'userX' },
+        ]);
+      }
+      if (sql.includes('DELETE')) {
+        deletedPuuid = params[0];
+        return Effect.succeed([]);
+      }
+      return Effect.succeed([]);
+    }) as unknown as D1Client.D1Client);
+
+    const interaction = {
+      id: 'i-unlink-alt',
+      type: InteractionType.APPLICATION_COMMAND,
+      token: 'tok',
+      user: { id: 'userX' },
+      data: {
+        id: 'c-unlink',
+        name: 'unlink',
+        options: [{ name: 'player', type: 3, value: 'AltAcc#2002' }],
+      },
+    };
+
+    const response = await Effect.runPromise(
+      handleUnlinkCommand(interaction).pipe(Effect.provide(mockD1)),
+    );
+
+    expect(deletedPuuid).toBe('p-alt');
+    expect(response.data?.embeds?.[0]?.title).toContain('Account Unlinked');
+    expect(response.data?.embeds?.[0]?.description).toContain('AltAcc#2002');
+  });
+
+  it('handleRemoveCommand enforces admin permission and supports mention & tag', async () => {
+    // 1. Non-admin fails
+    const nonAdminInteraction = {
+      id: 'i-remove-fail',
+      type: InteractionType.APPLICATION_COMMAND,
+      token: 'tok',
+      member: {
+        user: { id: 'regular-user' },
+        permissions: '0',
+      },
+      data: {
+        id: 'c-remove',
+        name: 'remove',
+        options: [{ name: 'player', type: 3, value: 'Any#1234' }],
+      },
+    };
+
+    const dummyD1 = Layer.succeed(D1Client.D1Client, (() =>
+      Effect.succeed([])) as unknown as D1Client.D1Client);
+
+    const failResponse = await Effect.runPromise(
+      handleRemoveCommand(nonAdminInteraction).pipe(Effect.provide(dummyD1)),
+    );
+    expect(failResponse.data?.content).toContain('Administrator');
+
+    // 2. Admin removes by mention
+    let deleteQuery = '';
+    const adminD1 = Layer.succeed(D1Client.D1Client, ((query: any, ..._params: any[]) => {
+      deleteQuery = typeof query === 'string' ? query : Array.isArray(query) ? query.join('?') : '';
+      return Effect.succeed([]);
+    }) as unknown as D1Client.D1Client);
+
+    const adminMentionInteraction = {
+      id: 'i-remove-admin',
+      type: InteractionType.APPLICATION_COMMAND,
+      token: 'tok',
+      member: {
+        user: { id: 'admin-user' },
+        permissions: `${1n << 3n}`, // ADMINISTRATOR
+      },
+      data: {
+        id: 'c-remove',
+        name: 'remove',
+        options: [{ name: 'player', type: 3, value: '<@999999>' }],
+      },
+    };
+
+    const adminResponse = await Effect.runPromise(
+      handleRemoveCommand(adminMentionInteraction).pipe(Effect.provide(adminD1)),
+    );
+    expect(deleteQuery).toContain('discord_user_id =');
+    expect(adminResponse.data?.embeds?.[0]?.title).toContain('Member Accounts Removed');
   });
 });

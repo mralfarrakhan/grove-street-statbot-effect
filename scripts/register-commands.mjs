@@ -99,11 +99,68 @@ const commands = [
 ];
 
 async function registerCommands() {
-  console.log(
-    `📡 Registering ${commands.length} global slash commands for application ${applicationId}...`,
-  );
+  const args = process.argv.slice(2);
+  const isClearGuild = args.includes('--clear-guild');
+  const isClearGlobal = args.includes('--clear-global');
 
-  const url = `https://discord.com/api/v10/applications/${applicationId}/commands`;
+  if (isClearGlobal) {
+    console.log(`🧹 Clearing all global commands...`);
+    const url = `https://discord.com/api/v10/applications/${applicationId}/commands`;
+    const res = await fetch(url, {
+      method: 'PUT',
+      headers: { Authorization: `Bot ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify([]),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    console.log(`✅ All global commands cleared!`);
+    return;
+  }
+
+  const cleanArgs = args.filter((a) => !a.startsWith('--'));
+  const targetGuild = isClearGuild
+    ? cleanArgs[0]
+    : cleanArgs[0] || env.DISCORD_GUILD_ID || env.GUILD_ID;
+
+  if (isClearGuild) {
+    if (!targetGuild) {
+      console.error(
+        '❌ Please specify the Server ID to clear: npm run register-commands -- --clear-guild <SERVER_ID>',
+      );
+      process.exit(1);
+    }
+    console.log(`🧹 Clearing guild commands for Server ID: ${targetGuild}...`);
+    const url = `https://discord.com/api/v10/applications/${applicationId}/guilds/${targetGuild}/commands`;
+    const res = await fetch(url, {
+      method: 'PUT',
+      headers: { Authorization: `Bot ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify([]),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    console.log(
+      `✅ All guild commands for server ${targetGuild} cleared! Reload Discord (Cmd+R / Ctrl+R) to see the single global set.`,
+    );
+    return;
+  }
+
+  const guildId = targetGuild;
+
+  if (guildId) {
+    console.log(
+      `⚡ Registering ${commands.length} INSTANT Guild commands for Server ID: ${guildId}...`,
+    );
+  } else {
+    console.log(
+      `📡 Registering ${commands.length} global slash commands for application ${applicationId}...`,
+    );
+    console.log(
+      `💡 Tip: To register instantly with 0 delay, run: npm run register-commands -- <YOUR_SERVER_ID>`,
+    );
+  }
+
+  const url = guildId
+    ? `https://discord.com/api/v10/applications/${applicationId}/guilds/${guildId}/commands`
+    : `https://discord.com/api/v10/applications/${applicationId}/commands`;
+
   const response = await fetch(url, {
     method: 'PUT',
     headers: {

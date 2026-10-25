@@ -1,7 +1,7 @@
 import { HttpClient, HttpClientRequest, HttpClientResponse } from '@effect/platform';
 import { D1Client } from '@effect/sql-d1';
 import { env } from 'cloudflare:workers';
-import { Effect, Option, pipe } from 'effect';
+import { DateTime, Effect, Option, pipe } from 'effect';
 import { computeStreak } from '../handles';
 import { fetchPlayerMatchPerformance } from '../match';
 import { AccountV2, MMRHistoryV2, Player } from '../schemas';
@@ -123,29 +123,33 @@ const getPlayerMMRSummary = (
   );
 };
 
-const resolveTargetPlayer = (
+export const resolveTargetPlayers = (
   interaction: DiscordInteraction,
   playerOption?: string,
-): Effect.Effect<Option.Option<Player>, never, D1Client.D1Client> =>
+): Effect.Effect<ReadonlyArray<Player>, never, D1Client.D1Client> =>
   D1Client.D1Client.pipe(
     Effect.flatMap((d1) => {
       if (playerOption && playerOption.trim().length > 0) {
         const raw = playerOption.trim();
+        const mentionMatch = raw.match(/^<@!?(\d+)>$/);
+        if (mentionMatch && mentionMatch[1]) {
+          const discordId = mentionMatch[1];
+          return d1<Player>`SELECT puuid, name, tag, discord_user_id FROM players WHERE discord_user_id = ${discordId} ORDER BY name ASC`;
+        }
+
         if (raw.includes('#')) {
           const [name, tag] = raw.split('#');
           return d1<Player>`SELECT puuid, name, tag, discord_user_id FROM players WHERE LOWER(name) = LOWER(${name?.trim() ?? ''}) AND LOWER(tag) = LOWER(${tag?.trim() ?? ''}) LIMIT 1`;
         }
-        return d1<Player>`SELECT puuid, name, tag, discord_user_id FROM players WHERE LOWER(name) = LOWER(${raw}) OR LOWER(name) LIKE ${`%${raw.toLowerCase()}%`} LIMIT 1`;
+
+        return d1<Player>`SELECT puuid, name, tag, discord_user_id FROM players WHERE LOWER(name) = LOWER(${raw}) OR LOWER(name) LIKE ${`%${raw.toLowerCase()}%`} ORDER BY name ASC`;
       }
 
       const callerId = interaction.member?.user.id ?? interaction.user?.id;
       if (!callerId) return Effect.succeed([]);
-      return d1<Player>`SELECT puuid, name, tag, discord_user_id FROM players WHERE discord_user_id = ${callerId} LIMIT 1`;
+      return d1<Player>`SELECT puuid, name, tag, discord_user_id FROM players WHERE discord_user_id = ${callerId} ORDER BY name ASC`;
     }),
-    Effect.map((rows) =>
-      rows.length > 0 && rows[0] ? Option.some(rows[0]) : Option.none<Player>(),
-    ),
-    Effect.catchAll(() => Effect.succeed(Option.none<Player>())),
+    Effect.catchAll(() => Effect.succeed([])),
   );
 
 export const handleRankCommand = (
@@ -159,13 +163,13 @@ export const handleRankCommand = (
     | string
     | undefined;
 
-  return resolveTargetPlayer(interaction, playerOpt).pipe(
-    Effect.flatMap((maybePlayer) => {
-      if (Option.isNone(maybePlayer)) {
+  return resolveTargetPlayers(interaction, playerOpt).pipe(
+    Effect.flatMap((players) => {
+      if (players.length === 0) {
         if (!playerOpt) {
           return Effect.succeed(
             makeEphemeralResponse(
-              '⚠️ **Discord Account Not Linked**\nYour Discord account is not yet linked to a Riot ID.\n• Use `/link riot_id: Name#Tag` to link your account\n• Or check another player with `/rank player: Name#Tag`',
+              '⚠️ **Discord Account Not Linked**\nYour Discord account is not yet linked to a Riot ID.\n• Use `/link riot_id: Name#Tag` to link your account\n• Or check another player with `/rank player: Name#Tag` or `/rank player: @Member`',
             ),
           );
         }
@@ -176,16 +180,35 @@ export const handleRankCommand = (
         );
       }
 
-      const player = maybePlayer.value;
-      return getPlayerMMRSummary(player.puuid).pipe(
-        Effect.map((maybeSummary) => {
-          if (Option.isNone(maybeSummary)) {
+      return Effect.forEach(
+        players,
+        (p) =>
+          getPlayerMMRSummary(p.puuid).pipe(
+            Effect.map((maybeSum) => ({
+              player: p,
+              summary: Option.getOrUndefined(maybeSum),
+            })),
+          ),
+        { concurrency: 3 },
+      ).pipe(
+        Effect.map((accountSummaries) => {
+          const validSummaries = accountSummaries.filter(
+            (a): a is { player: Player; summary: CachedMMRSummary } => a.summary !== undefined,
+          );
+
+          if (validSummaries.length === 0) {
+            const first = players[0];
             return makeEphemeralResponse(
-              `❌ Failed to retrieve live rank data for **${player.name}#${player.tag}** from Riot API.`,
+              `❌ Failed to retrieve live rank data for **${first?.name}#${first?.tag}** from Riot API.`,
             );
           }
 
-          const s = maybeSummary.value;
+          // Sort by ELO descending to find the highest-ranked account
+          const sorted = [...validSummaries].sort((a, b) => b.summary.elo - a.summary.elo);
+          const top = sorted[0]!;
+          const s = top.summary;
+          const p = top.player;
+
           const streakBadge =
             s.streakCount >= 3
               ? s.streakType === 'win'
@@ -193,9 +216,21 @@ export const handleRankCommand = (
                 : `⚠️ **${s.streakCount}-Loss Skid**`
               : '—';
 
+          let footerText = p.discord_user_id
+            ? `Linked to Discord User ID: ${p.discord_user_id}`
+            : 'Unlinked account';
+
+          if (sorted.length > 1) {
+            const others = sorted.slice(1);
+            const otherNames = others
+              .map((o) => `${o.player.name}#${o.player.tag} (${o.summary.tierName})`)
+              .join(', ');
+            footerText = `Highest of ${sorted.length} linked accounts • Also tracking: ${otherNames}`;
+          }
+
           const embed: DiscordEmbed = {
             author: { name: 'Grove Street Statbot' },
-            title: `📈 Rank Card: ${player.name}#${player.tag}`,
+            title: `📈 Rank Card: ${p.name}#${p.tag}`,
             thumbnail: { url: getTierIconUrl(s.tierId) },
             color: getTierColor(s.tierName),
             fields: [
@@ -208,11 +243,7 @@ export const handleRankCommand = (
               },
               { name: 'Streak Status', value: streakBadge, inline: true },
             ],
-            footer: {
-              text: player.discord_user_id
-                ? `Linked to Discord User ID: ${player.discord_user_id}`
-                : 'Unlinked account',
-            },
+            footer: { text: footerText },
             timestamp: new Date().toISOString(),
           };
 
@@ -234,13 +265,13 @@ export const handleLastMatchCommand = (
     | string
     | undefined;
 
-  return resolveTargetPlayer(interaction, playerOpt).pipe(
-    Effect.flatMap((maybePlayer) => {
-      if (Option.isNone(maybePlayer)) {
+  return resolveTargetPlayers(interaction, playerOpt).pipe(
+    Effect.flatMap((players) => {
+      if (players.length === 0) {
         if (!playerOpt) {
           return Effect.succeed(
             makeEphemeralResponse(
-              '⚠️ **Discord Account Not Linked**\nYour Discord account is not yet linked to a Riot ID.\n• Use `/link riot_id: Name#Tag` to link your account\n• Or check another player with `/lastmatch player: Name#Tag`',
+              '⚠️ **Discord Account Not Linked**\nYour Discord account is not yet linked to a Riot ID.\n• Use `/link riot_id: Name#Tag` to link your account\n• Or check another player with `/lastmatch player: Name#Tag` or `/lastmatch player: @Member`',
             ),
           );
         }
@@ -251,26 +282,53 @@ export const handleLastMatchCommand = (
         );
       }
 
-      const player = maybePlayer.value;
-      return getPlayerMMRSummary(player.puuid).pipe(
-        Effect.flatMap((maybeSummary) => {
-          if (Option.isNone(maybeSummary)) {
+      return Effect.forEach(
+        players,
+        (p) =>
+          fetchPlayerMMR(p.puuid).pipe(
+            Effect.map((mmr) => {
+              const latest = mmr.data.history[0];
+              return { player: p, latest };
+            }),
+            Effect.catchAll(() => Effect.succeed({ player: p, latest: undefined })),
+          ),
+        { concurrency: 3 },
+      ).pipe(
+        Effect.flatMap((matches) => {
+          const valid = matches.filter(
+            (m): m is { player: Player; latest: NonNullable<typeof m.latest> } =>
+              m.latest !== undefined,
+          );
+
+          if (valid.length === 0) {
+            const first = players[0];
             return Effect.succeed(
               makeEphemeralResponse(
-                `❌ Failed to load recent match history for **${player.name}#${player.tag}**.`,
+                `❌ Failed to load recent match history for **${first?.name}#${first?.tag}**.`,
               ),
             );
           }
 
-          const s = maybeSummary.value;
-          return fetchPlayerMatchPerformance(s.matchId, player.puuid).pipe(
-            Effect.map((maybePerf) => {
-              const won = s.lastChange > 0;
-              const outcomeTitle = won
-                ? `🏆 Victory on ${s.map} (+${s.lastChange} RR)`
-                : `💀 Defeat on ${s.map} (${s.lastChange} RR)`;
+          // Pick newest match by date across all accounts
+          const sorted = [...valid].sort(
+            (a, b) =>
+              DateTime.toEpochMillis(b.latest.date) - DateTime.toEpochMillis(a.latest.date),
+          );
+          const newest = sorted[0]!;
+          const p = newest.player;
+          const s = newest.latest;
 
-              const perfFields: Array<{ name: string; value: string; inline?: boolean }> = [];
+          return fetchPlayerMatchPerformance(s.match_id, p.puuid).pipe(
+            Effect.map((maybePerf) => {
+              const won = s.last_change > 0;
+              const accountTag = players.length > 1 ? ` (${p.name}#${p.tag})` : '';
+              const outcomeTitle = won
+                ? `🏆 Victory on ${s.map.name} (+${s.last_change} RR)${accountTag}`
+                : `💀 Defeat on ${s.map.name} (${s.last_change} RR)${accountTag}`;
+
+              const perfFields: Array<{ name: string; value: string; inline?: boolean }> = [
+                { name: 'Account', value: `**${p.name}#${p.tag}**`, inline: true },
+              ];
 
               if (Option.isSome(maybePerf)) {
                 const perf = maybePerf.value;
@@ -292,12 +350,12 @@ export const handleLastMatchCommand = (
               }
 
               const embed: DiscordEmbed = {
-                author: { name: `${player.name}#${player.tag}` },
+                author: { name: `${p.name}#${p.tag}` },
                 title: outcomeTitle,
                 color: won ? 0x48a66d : 0xc83c5b,
                 fields: perfFields,
-                footer: { text: `Tier at conclusion: ${s.tierName} (${s.rr} RR)` },
-                timestamp: new Date().toISOString(),
+                footer: { text: `Tier at conclusion: ${s.tier.name} (${s.rr} RR)` },
+                timestamp: DateTime.toDate(s.date).toISOString(),
               };
 
               return makeSuccessResponse(embed);
@@ -348,8 +406,10 @@ export const handleLeaderboardCommand = (): Effect.Effect<
         const medal = medals[idx] ?? `**#${idx + 1}**`;
         const p = entry.player;
         const s = entry.summary;
+        const ownerTag = p.discord_user_id ? ` (<@${p.discord_user_id}>)` : '';
+
         if (!s) {
-          return `${medal} **${p.name}#${p.tag}** — *Uncalibrated*`;
+          return `${medal} **${p.name}#${p.tag}**${ownerTag} — *Uncalibrated*`;
         }
 
         const streakBadge =
@@ -359,14 +419,14 @@ export const handleLeaderboardCommand = (): Effect.Effect<
               : `⚠️ ${s.streakCount}L`
             : '';
 
-        return `${medal} **${p.name}#${p.tag}** — **${s.tierName}** (${s.rr} RR) ${streakBadge}`.trim();
+        return `${medal} **${p.name}#${p.tag}**${ownerTag} — **${s.tierName}** (${s.rr} RR) ${streakBadge}`.trim();
       });
 
       const embed: DiscordEmbed = {
         title: '🏆 Grove Street Crew Leaderboard',
         description: lines.join('\n\n'),
         color: 0xffd700,
-        footer: { text: `Tracking ${items.length} players • 5-min cache active` },
+        footer: { text: `Tracking ${items.length} accounts • 5-min cache active` },
         timestamp: new Date().toISOString(),
       };
 
@@ -434,16 +494,20 @@ export const handleLinkCommand = (
                 );
               }
 
-              return d1`DELETE FROM players WHERE discord_user_id = ${callerId}`.pipe(
+              // Additive insert/update - does NOT delete caller's previous accounts
+              return d1`INSERT INTO players (puuid, name, tag, discord_user_id) VALUES (${acc.data.puuid}, ${acc.data.name}, ${acc.data.tag}, ${callerId})
+                 ON CONFLICT(puuid) DO UPDATE SET name = ${acc.data.name}, tag = ${acc.data.tag}, discord_user_id = ${callerId}`.pipe(
                 Effect.flatMap(
                   () =>
-                    d1`INSERT INTO players (puuid, name, tag, discord_user_id) VALUES (${acc.data.puuid}, ${acc.data.name}, ${acc.data.tag}, ${callerId})
-                     ON CONFLICT(puuid) DO UPDATE SET name = ${acc.data.name}, tag = ${acc.data.tag}, discord_user_id = ${callerId}`,
+                    d1<Player>`SELECT puuid, name, tag FROM players WHERE discord_user_id = ${callerId}`,
                 ),
-                Effect.map(() => {
+                Effect.map((allCallerAccounts) => {
+                  const count = allCallerAccounts.length;
+                  const countNote = count > 1 ? ` You now have **${count} accounts** linked!` : '';
+
                   const embed: DiscordEmbed = {
                     title: '✅ Riot Account Linked Successfully!',
-                    description: `<@${callerId}> is now officially registered and linked to **${acc.data.name}#${acc.data.tag}**!`,
+                    description: `<@${callerId}> is now officially linked to **${acc.data.name}#${acc.data.tag}**!${countNote}`,
                     color: 0x48a66d,
                     fields: [
                       {
@@ -452,8 +516,9 @@ export const handleLinkCommand = (
                         inline: true,
                       },
                       { name: 'Account Level', value: `${acc.data.account_level}`, inline: true },
+                      { name: 'Total Accounts Linked', value: `${count}`, inline: true },
                     ],
-                    footer: { text: 'You can now use /rank and /lastmatch without options!' },
+                    footer: { text: 'You can use /rank and /lastmatch without options anytime!' },
                     timestamp: new Date().toISOString(),
                   };
                   return makeSuccessResponse(embed);
@@ -482,24 +547,68 @@ export const handleUnlinkCommand = (
     return Effect.succeed(makeEphemeralResponse('❌ Could not identify your Discord user ID.'));
   }
 
+  const playerOpt = interaction.data?.options?.find((o) => o.name === 'player')?.value as
+    | string
+    | undefined;
+
   return D1Client.D1Client.pipe(
     Effect.flatMap((d1) =>
-      d1<Player>`SELECT puuid, name, tag FROM players WHERE discord_user_id = ${callerId} LIMIT 1`.pipe(
-        Effect.flatMap((rows) => {
-          const p = rows[0];
-          if (!p) {
+      d1<Player>`SELECT puuid, name, tag FROM players WHERE discord_user_id = ${callerId}`.pipe(
+        Effect.flatMap((accounts) => {
+          if (accounts.length === 0) {
             return Effect.succeed(
-              makeEphemeralResponse('ℹ️ You do not currently have any linked Riot account.'),
+              makeEphemeralResponse('ℹ️ You do not currently have any linked Riot accounts.'),
             );
           }
 
-          return d1`DELETE FROM players WHERE discord_user_id = ${callerId}`.pipe(
-            Effect.map(() =>
-              makeSuccessResponse({
-                title: '✅ Account Unlinked',
-                description: `Successfully unlinked and stopped tracking **${p.name}#${p.tag}** for <@${callerId}>.`,
-                color: 0x48a66d,
-              }),
+          // If a specific player was requested
+          if (playerOpt && playerOpt.trim().length > 0) {
+            const raw = playerOpt.trim().toLowerCase();
+            const target = accounts.find(
+              (a) => `${a.name}#${a.tag}`.toLowerCase() === raw || a.name.toLowerCase() === raw,
+            );
+
+            if (!target) {
+              const accountList = accounts.map((a) => `• \`${a.name}#${a.tag}\``).join('\n');
+              return Effect.succeed(
+                makeEphemeralResponse(
+                  `❌ Could not find **"${playerOpt}"** among your linked accounts:\n${accountList}`,
+                ),
+              );
+            }
+
+            return d1`DELETE FROM players WHERE puuid = ${target.puuid}`.pipe(
+              Effect.map(() =>
+                makeSuccessResponse({
+                  title: '✅ Account Unlinked',
+                  description: `Successfully unlinked and stopped tracking **${target.name}#${target.tag}** for <@${callerId}>. (${accounts.length - 1} accounts remaining)`,
+                  color: 0x48a66d,
+                }),
+              ),
+            );
+          }
+
+          // If only 1 account, unlink it directly
+          if (accounts.length === 1 && accounts[0]) {
+            const only = accounts[0];
+            return d1`DELETE FROM players WHERE puuid = ${only.puuid}`.pipe(
+              Effect.map(() =>
+                makeSuccessResponse({
+                  title: '✅ Account Unlinked',
+                  description: `Successfully unlinked and stopped tracking **${only.name}#${only.tag}** for <@${callerId}>.`,
+                  color: 0x48a66d,
+                }),
+              ),
+            );
+          }
+
+          // If multiple accounts exist and none specified, guide user to pick
+          const accountList = accounts
+            .map((a) => `• \`/unlink player: ${a.name}#${a.tag}\``)
+            .join('\n');
+          return Effect.succeed(
+            makeEphemeralResponse(
+              `⚠️ You have **${accounts.length} accounts** linked. Please specify which account to unlink:\n\n${accountList}`,
             ),
           );
         }),
@@ -530,22 +639,37 @@ export const handleRemoveCommand = (
   if (!playerOpt || playerOpt.trim().length === 0) {
     return Effect.succeed(
       makeEphemeralResponse(
-        '⚠️ Please specify the player to remove (e.g. `/remove player: Jett#1234`).',
+        '⚠️ Please specify the player to remove (e.g. `/remove player: Jett#1234` or `/remove player: @Member`).',
       ),
     );
   }
 
   const raw = playerOpt.trim();
-  let name = raw;
-  let tag: string | undefined;
-  if (raw.includes('#')) {
-    const parts = raw.split('#');
-    name = parts[0]?.trim() ?? '';
-    tag = parts[1]?.trim();
-  }
+  const mentionMatch = raw.match(/^<@!?(\d+)>$/);
 
   return D1Client.D1Client.pipe(
     Effect.flatMap((d1) => {
+      if (mentionMatch && mentionMatch[1]) {
+        const discordId = mentionMatch[1];
+        return d1`DELETE FROM players WHERE discord_user_id = ${discordId}`.pipe(
+          Effect.map(() =>
+            makeSuccessResponse({
+              title: '🗑️ Member Accounts Removed',
+              description: `Successfully removed all accounts linked to <@${discordId}> from tracking.`,
+              color: 0x5a5959,
+            }),
+          ),
+        );
+      }
+
+      let name = raw;
+      let tag: string | undefined;
+      if (raw.includes('#')) {
+        const parts = raw.split('#');
+        name = parts[0]?.trim() ?? '';
+        tag = parts[1]?.trim();
+      }
+
       const query = tag
         ? d1`DELETE FROM players WHERE LOWER(name) = LOWER(${name}) AND LOWER(tag) = LOWER(${tag})`
         : d1`DELETE FROM players WHERE LOWER(name) = LOWER(${name})`;
@@ -580,16 +704,35 @@ export const handleListCommand = (): Effect.Effect<
         return makeEphemeralResponse('ℹ️ No players are currently registered in the database.');
       }
 
-      const lines = players.map(
-        (p) =>
-          `• **${p.name}#${p.tag}** — ${p.discord_user_id ? `<@${p.discord_user_id}>` : '*Unlinked*'}`,
-      );
+      const memberMap = new Map<string, Array<Player>>();
+      const unlinked: Array<Player> = [];
+
+      for (const p of players) {
+        if (p.discord_user_id) {
+          const list = memberMap.get(p.discord_user_id) ?? [];
+          list.push(p);
+          memberMap.set(p.discord_user_id, list);
+        } else {
+          unlinked.push(p);
+        }
+      }
+
+      const lines: string[] = [];
+      for (const [discordId, memberPlayers] of memberMap.entries()) {
+        const accs = memberPlayers.map((p) => `**${p.name}#${p.tag}**`).join(', ');
+        lines.push(`• <@${discordId}> (${memberPlayers.length}): ${accs}`);
+      }
+
+      if (unlinked.length > 0) {
+        const accs = unlinked.map((p) => `**${p.name}#${p.tag}**`).join(', ');
+        lines.push(`• *Unlinked* (${unlinked.length}): ${accs}`);
+      }
 
       const embed: DiscordEmbed = {
         title: '📋 Grove Street Tracked Roster',
-        description: `Tracking **${players.length}** crew members:\n\n${lines.join('\n')}`,
+        description: `Tracking **${players.length}** accounts across **${memberMap.size}** members:\n\n${lines.join('\n')}`,
         color: 0x5865f2,
-        footer: { text: 'Use /link to link your account or /rank to inspect stats' },
+        footer: { text: 'Use /link to register accounts or /rank to inspect stats' },
         timestamp: new Date().toISOString(),
       };
 
