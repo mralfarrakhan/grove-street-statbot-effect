@@ -9,8 +9,8 @@ import { logStructuredError } from './logger';
 const playerRoute = HttpRouter.empty.pipe(
   HttpRouter.put('/', insertPlayer),
   HttpRouter.del('/', removePlayer),
-  HttpRouter.use(makeBasicAuth(env.ADMIN_USERNAME, env.ADMIN_PASSWORD)),
   HttpRouter.get('/', getPlayers),
+  HttpRouter.use(makeBasicAuth(env.ADMIN_USERNAME, env.ADMIN_PASSWORD)),
 );
 
 const api = HttpRouter.empty.pipe(

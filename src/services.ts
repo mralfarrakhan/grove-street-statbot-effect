@@ -10,11 +10,19 @@ export class KVError extends Data.TaggedError('KVError')<{
   cause: unknown;
 }> {}
 
+export interface KVSetOptions {
+  readonly expirationTtl?: number;
+}
+
 export class KVClient extends Context.Tag('KVClient')<
   KVClient,
   {
     readonly get: (key: string) => Effect.Effect<Option.Option<string>, KVError>;
-    readonly set: (key: string, value: string) => Effect.Effect<void, KVError>;
+    readonly set: (
+      key: string,
+      value: string,
+      options?: KVSetOptions,
+    ) => Effect.Effect<void, KVError>;
   }
 >() {}
 
@@ -26,9 +34,12 @@ export const KVLive = Layer.succeed(
         try: () => env.STATBOT_KV.get(key),
         catch: (e) => new KVError({ cause: e }),
       }).pipe(Effect.map(Option.fromNullable)),
-    set: (key, value) =>
+    set: (key, value, options) =>
       Effect.tryPromise({
-        try: () => env.STATBOT_KV.put(key, value),
+        try: () =>
+          options?.expirationTtl !== undefined
+            ? env.STATBOT_KV.put(key, value, { expirationTtl: options.expirationTtl })
+            : env.STATBOT_KV.put(key, value),
         catch: (e) => new KVError({ cause: e }),
       }),
   }),

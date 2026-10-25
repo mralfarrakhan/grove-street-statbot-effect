@@ -526,7 +526,7 @@ export const scheduled = dbGetPlayers.pipe(
           ),
         ),
       {
-        concurrency: 'unbounded',
+        concurrency: 2,
       },
     ),
   ),
