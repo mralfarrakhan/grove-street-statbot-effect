@@ -18,6 +18,7 @@ import {
   RemovePlayerSchema,
   MMRHistoryV2,
   Agents,
+  Agent,
   AIResponse,
   HookMessage,
   MMRHistoryV2Account,
@@ -30,7 +31,7 @@ import {
   HttpServerResponse,
 } from '@effect/platform';
 import { env } from 'cloudflare:workers';
-import { AIClient, AIError, KVClient } from './services';
+import { AIClient, KVClient } from './services';
 import { SqlResolver } from '@effect/sql';
 import {
   DownRank,
@@ -39,29 +40,30 @@ import {
   NoChange,
   reportMatch,
   UpRank,
+  DerankProtected,
+  RefundedRR,
   type Report,
 } from './model';
+import { getAgentPersona } from './personas';
+import { fetchPlayerMatchPerformance } from './match';
 import {
-  downRankPrompt,
-  firstRankPrompt,
-  promptGenerator,
-  upRankPrompt,
+  type PartnerPromptContext,
+  buildCommanderRefundPrompt,
+  buildDerankProtectedPartnerPrompt,
+  buildDownRankPartnerPrompt,
+  buildFirstRankPartnerPrompt,
+  buildUpRankPartnerPrompt,
 } from './prompts';
-import he from 'he';
-import mustache from 'mustache';
 
 const dbGetPlayers = D1Client.D1Client.pipe(
   Effect.flatMap(
-    (v) =>
-      v<Player>`SELECT puuid, name, tag, discord_user_id FROM players ORDER BY name DESC`,
+    (v) => v<Player>`SELECT puuid, name, tag, discord_user_id FROM players ORDER BY name DESC`,
   ),
 );
 
 export const getPlayers = dbGetPlayers.pipe(
   Effect.flatMap(Schema.decode(Schema.Array(Player))),
-  Effect.flatMap((players) =>
-    HttpServerResponse.schemaJson(Schema.Array(Player))(players),
-  ),
+  Effect.flatMap((players) => HttpServerResponse.schemaJson(Schema.Array(Player))(players)),
 );
 
 const enrichAccount =
@@ -83,9 +85,7 @@ const enrichAccount =
 const makeFetchAccount = (name: string, tag: string) =>
   HttpClient.HttpClient.pipe(
     Effect.flatMap((c) =>
-      HttpClientRequest.get(
-        `https://api.henrikdev.xyz/valorant/v2/account/${name}/${tag}`,
-      ).pipe(
+      HttpClientRequest.get(`https://api.henrikdev.xyz/valorant/v2/account/${name}/${tag}`).pipe(
         HttpClientRequest.setHeaders({ Authorization: env.VALAPIKEY, Accept: '*/*' }),
         c.execute,
         Effect.flatMap(HttpClientResponse.schemaBodyJson(AccountV2)),
@@ -127,8 +127,7 @@ export const insertPlayer = HttpServerRequest.schemaBodyJson(InsertPlayerSchema)
 const makeDbRemovePlayer = (name: string, tag: string) =>
   D1Client.D1Client.pipe(
     Effect.flatMap(
-      (s) =>
-        s<Schema.Void>`DELETE FROM players WHERE name = ${s(name)} AND tag = ${s(tag)}`,
+      (s) => s<Schema.Void>`DELETE FROM players WHERE name = ${s(name)} AND tag = ${s(tag)}`,
     ),
   );
 
@@ -153,146 +152,260 @@ const makeFetchMMRHistoryV2 = (player: Player) =>
     ),
   );
 
-const makeGetLatestRankChange =
-  (m: MMRHistoryV2) => (lastMatchId: Option.Option<string>) =>
-    pipe(
-      Option.match(lastMatchId, {
-        onNone: () => [...m.data.history],
-        onSome: (lastMatchId) =>
-          pipe(
-            Array.findFirstIndex(m.data.history, (x) => x.match_id === lastMatchId),
-            Option.map((l) => Array.take(m.data.history, l + 1)),
-            Option.getOrElse(() => [...m.data.history]),
-          ),
-      }),
-      (tt) => Array.zip(tt, Array.drop(tt, 1)),
-      (u) => Array.findFirst(u, ([l, r]) => l.tier.id !== r.tier.id),
-      Option.flatMap(([l, r]) =>
-        Match.value({ v: { l, r } }).pipe(
-          Match.when({ v: ({ r }) => r.tier.id === 0 }, () =>
-            FirstRank({ rank: l.tier.name }),
-          ),
-          Match.when({ v: ({ l, r }) => l.season.id !== r.season.id }, () => NewSeason()),
-          Match.when(
-            { v: ({ l, r }) => l.season.id === r.season.id && l.tier.id > r.tier.id },
-            () =>
-              UpRank({
-                oldRank: r.tier.name,
-                newRank: l.tier.name,
-              }),
-          ),
-          Match.when(
-            { v: ({ l, r }) => l.season.id === r.season.id && l.tier.id < r.tier.id },
-            () =>
-              DownRank({
-                oldRank: r.tier.name,
-                newRank: l.tier.name,
-              }),
-          ),
-          Match.option,
-        ),
-      ),
-      Option.getOrElse(() => NoChange()),
-    );
-
-const llmReportGenerator = <
-  M extends {
-    player: string;
-    new_rank: string;
-    discord_user_id: string;
-  },
->(
-  prompt: string,
-  agent: string,
-  description: string,
-  run: (prompt: string) => Effect.Effect<Record<string, unknown>, AIError>,
-  view: M,
-  fallback: string,
-) =>
+const makeGetLatestRankChange = (m: MMRHistoryV2) => (lastMatchId: Option.Option<string>) =>
   pipe(
-    promptGenerator(prompt, agent, description),
-    Effect.succeed,
-    Effect.flatMap(run),
-    Effect.flatMap((v) => Schema.decodeUnknown(AIResponse)(v)),
-    Effect.flatMap((v) => Option.fromNullable(v.choices[0]?.message.content)),
-    Effect.map((v) => mustache.render(v, view)),
-    Effect.orElseSucceed(() => fallback),
-    Effect.optionFromOptional,
+    Option.match(lastMatchId, {
+      onNone: () => [...m.data.history],
+      onSome: (lastId) =>
+        pipe(
+          Array.findFirstIndex(m.data.history, (x) => x.match_id === lastId),
+          Option.map((l) => Array.take(m.data.history, l + 1)),
+          Option.getOrElse(() => [...m.data.history]),
+        ),
+    }),
+    (tt) => {
+      const isNewMatch = Option.isNone(lastMatchId) || tt.length > 1;
+      const latest = tt[0];
+
+      if (isNewMatch && latest) {
+        if (latest.refunded_rr > 0) {
+          return RefundedRR({
+            amount: latest.refunded_rr,
+            currentRank: latest.tier.name,
+          });
+        }
+
+        if (latest.was_derank_protected) {
+          return DerankProtected({
+            rank: latest.tier.name,
+            matchId: latest.match_id,
+            map: latest.map.name,
+            lastChange: latest.last_change,
+          });
+        }
+      }
+
+      return pipe(
+        Array.zip(tt, Array.drop(tt, 1)),
+        Array.findFirst(([l, r]) => l.tier.id !== r.tier.id),
+        Option.flatMap(([l, r]) =>
+          Match.value({ v: { l, r } }).pipe(
+            Match.when({ v: ({ r }) => r.tier.id === 0 }, () =>
+              FirstRank({
+                rank: l.tier.name,
+                matchId: l.match_id,
+                map: l.map.name,
+                lastChange: l.last_change,
+              }),
+            ),
+            Match.when({ v: ({ l, r }) => l.season.id !== r.season.id }, () => NewSeason()),
+            Match.when(
+              { v: ({ l, r }) => l.season.id === r.season.id && l.tier.id > r.tier.id },
+              () =>
+                UpRank({
+                  oldRank: r.tier.name,
+                  newRank: l.tier.name,
+                  matchId: l.match_id,
+                  map: l.map.name,
+                  lastChange: l.last_change,
+                }),
+            ),
+            Match.when(
+              { v: ({ l, r }) => l.season.id === r.season.id && l.tier.id < r.tier.id },
+              () =>
+                DownRank({
+                  oldRank: r.tier.name,
+                  newRank: l.tier.name,
+                  matchId: l.match_id,
+                  map: l.map.name,
+                  lastChange: l.last_change,
+                }),
+            ),
+            Match.option,
+          ),
+        ),
+        Option.getOrElse(() => NoChange()),
+      );
+    },
   );
 
-const makeGetReportConfig = (p: Player) => (r: Report) =>
-  pipe(
-    r,
-    reportMatch({
-      NoChange: () => Option.none(),
-      NewSeason: () => Option.none(),
-      FirstRank: ({ rank }) =>
-        Option.some({
-          prompt: firstRankPrompt,
-          rank,
-          fallback: `**${p.name}#${p.tag}** has started this season as ${rank}. keep the good work <@${p.discord_user_id}>.`,
+const fetchPlayableAgents = HttpClient.HttpClient.pipe(
+  Effect.flatMap((c) =>
+    HttpClientRequest.get('https://valorant-api.com/v1/agents?isPlayableCharacter=true').pipe(
+      c.execute,
+      Effect.flatMap(HttpClientResponse.schemaBodyJson(Agents)),
+    ),
+  ),
+);
+
+const defaultAgent = new Agent({
+  displayName: 'Brimstone',
+  displayIcon: new URL(
+    'https://media.valorant-api.com/agents/9f0d8ba9-42c0-8739-6604-6c39d37746b1/displayicon.png',
+  ),
+  description: 'Commander Brimstone',
+});
+
+const cleanDialogue = (text: string) =>
+  text
+    .trim()
+    .replace(/^["']|["']$/g, '')
+    .trim();
+
+const generateAndCreateHookMessage = ({
+  agent,
+  prompt,
+  fallback,
+}: {
+  agent: Agent;
+  prompt: string;
+  fallback: string;
+}) =>
+  AIClient.pipe(
+    Effect.flatMap((ai) => ai.run(prompt)),
+    Effect.flatMap((v) => Schema.decodeUnknown(AIResponse)(v)),
+    Effect.map((res) => {
+      const text = res.response ?? res.choices?.[0]?.message.content;
+      return text && text.trim().length > 0 ? cleanDialogue(text) : fallback;
+    }),
+    Effect.orElseSucceed(() => fallback),
+    Effect.flatMap((content) =>
+      Schema.decodeUnknown(HookMessage)({
+        content,
+        username: agent.displayName,
+        avatar_url: agent.displayIcon.toString(),
+      }),
+    ),
+    Effect.map(Option.some),
+    Effect.catchAll(() => Effect.succeed(Option.none<HookMessage>())),
+  );
+
+const buildMatchReport = ({
+  p,
+  matchId,
+  map,
+  lastChange,
+  buildPrompt,
+  fallback,
+}: {
+  p: Player;
+  matchId: string;
+  map: string;
+  lastChange: number;
+  buildPrompt: (ctx: PartnerPromptContext) => string;
+  fallback: string;
+}) =>
+  Effect.all({
+    maybePerf: fetchPlayerMatchPerformance(matchId, p.puuid),
+    agents: fetchPlayableAgents,
+  }).pipe(
+    Effect.flatMap(({ maybePerf, agents }) => {
+      const fallbackChoice =
+        agents.data.length > 0 ? Random.choice(agents.data) : Effect.succeed(defaultAgent);
+
+      return fallbackChoice.pipe(
+        Effect.flatMap((randomAgent) => {
+          const selectedAgent = pipe(
+            maybePerf,
+            Option.flatMap((perf) =>
+              Array.findFirst(
+                agents.data,
+                (a) => a.displayName.toLowerCase() === perf.character.toLowerCase(),
+              ),
+            ),
+            Option.getOrElse(() => randomAgent),
+          );
+
+          const persona = getAgentPersona(selectedAgent.displayName);
+          const kda = pipe(
+            maybePerf,
+            Option.map((perf) => `${perf.kills}/${perf.deaths}/${perf.assists}`),
+            Option.getOrUndefined,
+          );
+
+          const prompt = buildPrompt({
+            player: `**${p.name}#${p.tag}**`,
+            discordMention: `<@${p.discord_user_id}>`,
+            persona,
+            map: map !== '' ? map : 'Unknown Map',
+            lastChange,
+            kda,
+          });
+
+          return generateAndCreateHookMessage({
+            agent: selectedAgent,
+            prompt,
+            fallback,
+          });
         }),
-      DownRank: ({ newRank }) =>
-        Option.some({
-          prompt: downRankPrompt,
-          rank: newRank,
-          fallback: `**${p.name}#${p.tag}** has been demoted to ${newRank}. too bad, <@${p.discord_user_id}>.`,
-        }),
-      UpRank: ({ newRank }) =>
-        Option.some({
-          prompt: upRankPrompt,
-          rank: newRank,
-          fallback: `**${p.name}#${p.tag}** has been promoted to ${newRank}. well done, <@${p.discord_user_id}>.`,
-        }),
+      );
     }),
   );
 
 const makeBuildReport = (p: Player) => (r: Report) =>
   pipe(
     r,
-    makeGetReportConfig(p),
-    Option.match({
-      onNone: () => Effect.succeed(Option.none<HookMessage>()),
-      onSome: ({ prompt, rank, fallback }) =>
-        HttpClient.HttpClient.pipe(
-          Effect.flatMap((c) =>
-            HttpClientRequest.get('https://valorant-api.com/v1/agents').pipe(
-              c.execute,
-              Effect.flatMap(HttpClientResponse.schemaBodyJson(Agents)),
-              Effect.flatMap((v) => Random.choice(v.data)),
-            ),
-          ),
-          Effect.flatMap((a) =>
-            AIClient.pipe(
-              Effect.flatMap((ai) =>
-                llmReportGenerator(
-                  prompt,
-                  a.displayName,
-                  he.decode(a.description),
-                  ai.run,
-                  {
-                    player: `**${p.name}#${p.tag}**`,
-                    new_rank: rank,
-                    discord_user_id: `<@${p.discord_user_id}>`,
-                  },
-                  fallback,
-                ).pipe(
-                  Effect.flatMap(
-                    Option.map((m) =>
-                      Schema.decodeUnknown(HookMessage)({
-                        content: m,
-                        username: a.displayName,
-                        avatar_url: a.displayIcon.toString(),
-                      }),
-                    ),
-                  ),
-                  Effect.flatten,
-                  Effect.optionFromOptional,
-                ),
-              ),
-            ),
-          ),
+    reportMatch({
+      NoChange: () => Effect.succeed(Option.none<HookMessage>()),
+      NewSeason: () => Effect.succeed(Option.none<HookMessage>()),
+      RefundedRR: ({ amount, currentRank }) =>
+        fetchPlayableAgents.pipe(
+          Effect.flatMap((agents) => {
+            const brimstone =
+              agents.data.find((a) => a.displayName.toLowerCase() === 'brimstone') ??
+              agents.data[0] ??
+              defaultAgent;
+            const prompt = buildCommanderRefundPrompt(
+              `**${p.name}#${p.tag}**`,
+              `<@${p.discord_user_id}>`,
+              amount,
+              currentRank,
+            );
+            const fallback = `**${p.name}#${p.tag}** received +${amount} refunded RR after Vanguard banned a cheater. Justice served, <@${p.discord_user_id}>.`;
+
+            return generateAndCreateHookMessage({
+              agent: brimstone,
+              prompt,
+              fallback,
+            });
+          }),
         ),
+      FirstRank: ({ rank, matchId, map, lastChange }) =>
+        buildMatchReport({
+          p,
+          matchId,
+          map,
+          lastChange,
+          buildPrompt: (ctx) => buildFirstRankPartnerPrompt(ctx, rank),
+          fallback: `**${p.name}#${p.tag}** calibrated as ${rank} on ${map}. Ready for the climb, <@${p.discord_user_id}>.`,
+        }),
+      UpRank: ({ oldRank, newRank, matchId, map, lastChange }) =>
+        buildMatchReport({
+          p,
+          matchId,
+          map,
+          lastChange,
+          buildPrompt: (ctx) => buildUpRankPartnerPrompt(ctx, oldRank, newRank),
+          fallback: `**${p.name}#${p.tag}** has been promoted to ${newRank}! Well played on ${map}, <@${p.discord_user_id}>.`,
+        }),
+      DownRank: ({ oldRank, newRank, matchId, map, lastChange }) =>
+        buildMatchReport({
+          p,
+          matchId,
+          map,
+          lastChange,
+          buildPrompt: (ctx) => buildDownRankPartnerPrompt(ctx, oldRank, newRank),
+          fallback: `**${p.name}#${p.tag}** has been demoted to ${newRank}. Tough game on ${map}, <@${p.discord_user_id}>.`,
+        }),
+      DerankProtected: ({ rank, matchId, map, lastChange }) =>
+        buildMatchReport({
+          p,
+          matchId,
+          map,
+          lastChange,
+          buildPrompt: (ctx) => buildDerankProtectedPartnerPrompt(ctx, rank),
+          fallback: `**${p.name}#${p.tag}** was saved from demoting by the derank shield on ${map}! Still ${rank}, <@${p.discord_user_id}>.`,
+        }),
     }),
   );
 
@@ -308,9 +421,7 @@ const advanceKV = (m: MMRHistoryV2) =>
     Option.match({
       onNone: () => Effect.void,
       onSome: (latest) =>
-        KVClient.pipe(
-          Effect.flatMap((kv) => kv.set(m.data.account.puuid, latest.match_id)),
-        ),
+        KVClient.pipe(Effect.flatMap((kv) => kv.set(m.data.account.puuid, latest.match_id))),
     }),
   );
 
@@ -322,9 +433,7 @@ const ensureSorted = (m: MMRHistoryV2) =>
       ...m.data,
       history: pipe(
         m.data.history,
-        Array.sortBy(
-          Order.mapInput(Order.reverse(Order.Date), (h) => DateTime.toDate(h.date)),
-        ),
+        Array.sortBy(Order.mapInput(Order.reverse(Order.Date), (h) => DateTime.toDate(h.date))),
       ),
     },
   });
@@ -349,9 +458,7 @@ const makeReporting =
       Effect.flatMap((mmr) =>
         buildCategory(mmr).pipe(
           Effect.tap((v) =>
-            Console.log(
-              JSON.stringify({ event: 'rank_check', puuid: z.puuid, report: v }),
-            ),
+            Console.log(JSON.stringify({ event: 'rank_check', puuid: z.puuid, report: v })),
           ),
           Effect.flatMap(makeBuildReport(z)),
           Effect.flatMap((maybeMsg) =>
@@ -403,11 +510,22 @@ export const scheduled = dbGetPlayers.pipe(
     Effect.forEach(
       v,
       (z) =>
-        makeFetchMMRHistoryV2(z).pipe((x) =>
-          Effect.zipLeft(
-            x.pipe(makeReporting(z)),
-            x.pipe(Effect.flatMap(({ data }) => makeUpdateAccount(data.account))),
-            { concurrent: true },
+        makeFetchMMRHistoryV2(z).pipe(
+          (x) =>
+            Effect.zipLeft(
+              x.pipe(makeReporting(z)),
+              x.pipe(Effect.flatMap(({ data }) => makeUpdateAccount(data.account))),
+              { concurrent: true },
+            ),
+          Effect.catchAllCause((cause) =>
+            Console.error(
+              JSON.stringify({
+                event: 'player_processing_error',
+                puuid: z.puuid,
+                name: `${z.name}#${z.tag}`,
+                cause: cause.toJSON(),
+              }),
+            ),
           ),
         ),
       {

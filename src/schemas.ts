@@ -11,9 +11,7 @@ export const InsertPlayerSchema = Schema.Struct(
   Struct.pick(Player.fields, 'name', 'tag', 'discord_user_id'),
 );
 
-export const RemovePlayerSchema = Schema.Struct(
-  Struct.pick(Player.fields, 'name', 'tag'),
-);
+export const RemovePlayerSchema = Schema.Struct(Struct.pick(Player.fields, 'name', 'tag'));
 
 export class Errors extends Schema.Class<Errors>('Errors')({
   message: Schema.String,
@@ -33,8 +31,8 @@ export class AccountV2 extends BaseResponse.extend<AccountV2>('Account')({
     account_level: Schema.Number,
     name: Schema.String,
     tag: Schema.String,
-    card: Schema.UUID,
-    title: Schema.UUID,
+    card: Schema.String,
+    title: Schema.String,
     platforms: Schema.Array(Schema.String),
     updated_at: Schema.DateTimeUtc,
   }),
@@ -45,13 +43,13 @@ const MMRHistoryV2HistorySchema = Schema.Struct({
     id: Schema.Number,
     name: Schema.String,
   }),
-  match_id: Schema.UUID,
+  match_id: Schema.String,
   map: Schema.Struct({
-    id: Schema.UUID,
+    id: Schema.String,
     name: Schema.String,
   }),
   season: Schema.Struct({
-    id: Schema.UUID,
+    id: Schema.String,
     short: Schema.String,
   }),
   rr: Schema.Number,
@@ -64,9 +62,7 @@ const MMRHistoryV2HistorySchema = Schema.Struct({
 
 export type MMRHistoryV2History = typeof MMRHistoryV2HistorySchema.Type;
 
-export class MMRHistoryV2Account extends Schema.Class<MMRHistoryV2Account>(
-  'MMRHistoryV2Account',
-)({
+export class MMRHistoryV2Account extends Schema.Class<MMRHistoryV2Account>('MMRHistoryV2Account')({
   name: Schema.String,
   tag: Schema.String,
   puuid: Schema.UUID,
@@ -88,7 +84,7 @@ export class HookMessage extends Schema.Class<HookMessage>('HookMessage')({
 export class Agent extends Schema.Class<Agent>('AgentData')({
   displayName: Schema.String,
   displayIcon: Schema.URL,
-  description: Schema.String,
+  description: Schema.NullOr(Schema.String),
 }) {}
 
 export class Agents extends BaseResponse.extend<Agents>('Agents')({
@@ -104,5 +100,6 @@ export class AIChoice extends Schema.Class<AIChoice>('AIChoice')({
 }) {}
 
 export class AIResponse extends Schema.Class<AIResponse>('AIResponse')({
-  choices: Schema.Array(AIChoice),
+  choices: Schema.optional(Schema.Array(AIChoice)),
+  response: Schema.optional(Schema.String),
 }) {}

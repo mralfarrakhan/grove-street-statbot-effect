@@ -51,11 +51,17 @@ export const AILive = Layer.succeed(
     run: (prompt) =>
       Effect.tryPromise({
         try: () =>
-          env.AI.run('@cf/google/gemma-4-26b-a4b-it', {
+          env.AI.run('@cf/meta/llama-3.3-70b-instruct', {
             messages: [
-              { role: 'system', content: 'video game enthusiast' },
+              {
+                role: 'system',
+                content:
+                  'You are an elite voice actor and scriptwriter for Riot Games VALORANT. You write concise, lore-accurate spoken dialogue in the authentic voice and personality of VALORANT agents. Output only the spoken dialogue text.',
+              },
               { role: 'user', content: prompt },
             ],
+            temperature: 0.75,
+            max_tokens: 256,
           }),
         catch: (e) => new AIError({ cause: e }),
       }),
