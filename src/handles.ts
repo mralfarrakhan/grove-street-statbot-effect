@@ -13,9 +13,6 @@ import {
 } from 'effect';
 import {
   Player,
-  AccountV2,
-  InsertPlayerSchema,
-  RemovePlayerSchema,
   MMRHistoryV2,
   Agents,
   Agent,
@@ -23,16 +20,9 @@ import {
   HookMessage,
   MMRHistoryV2Account,
 } from './schemas';
-import {
-  HttpClient,
-  HttpClientRequest,
-  HttpClientResponse,
-  HttpServerRequest,
-  HttpServerResponse,
-} from '@effect/platform';
+import { HttpClient, HttpClientRequest, HttpClientResponse } from '@effect/platform';
 import { env } from 'cloudflare:workers';
 import { AIClient, KVClient } from './services';
-import { SqlResolver } from '@effect/sql';
 import {
   DownRank,
   FirstRank,
@@ -66,84 +56,6 @@ const dbGetPlayers = D1Client.D1Client.pipe(
   Effect.flatMap(
     (v) => v<Player>`SELECT puuid, name, tag, discord_user_id FROM players ORDER BY name DESC`,
   ),
-);
-
-export const getPlayers = dbGetPlayers.pipe(
-  Effect.flatMap(Schema.decode(Schema.Array(Player))),
-  Effect.flatMap((players) => HttpServerResponse.schemaJson(Schema.Array(Player))(players)),
-);
-
-const enrichAccount =
-  <T extends { name: string; tag: string }>({
-    name,
-    tag,
-  }: T): ((account: AccountV2) => AccountV2) =>
-  (account) =>
-    new AccountV2({
-      status: account.status,
-      errors: account.errors,
-      data: {
-        ...account.data,
-        name: account.data.name !== '' ? account.data.name : name,
-        tag: account.data.tag !== '' ? account.data.tag : tag,
-      },
-    });
-
-const makeFetchAccount = (name: string, tag: string) =>
-  HttpClient.HttpClient.pipe(
-    Effect.flatMap((c) =>
-      HttpClientRequest.get(`https://api.henrikdev.xyz/valorant/v2/account/${name}/${tag}`).pipe(
-        HttpClientRequest.setHeaders({ Authorization: env.VALAPIKEY, Accept: '*/*' }),
-        c.execute,
-        Effect.flatMap(HttpClientResponse.schemaBodyJson(AccountV2)),
-        Effect.map(enrichAccount({ name, tag })),
-      ),
-    ),
-  );
-
-const makeDbInsertPlayer = <T extends Player>(player: T) =>
-  D1Client.D1Client.pipe(
-    Effect.flatMap((s) =>
-      SqlResolver.void('insertPlayer', {
-        Request: Player,
-        execute: (p) => s`INSERT INTO players ${s.insert(p)}`,
-      }),
-    ),
-    Effect.flatMap((s) => s.execute(player)),
-  );
-
-export const insertPlayer = HttpServerRequest.schemaBodyJson(InsertPlayerSchema).pipe(
-  Effect.flatMap((v) =>
-    makeFetchAccount(v.name, v.tag).pipe(
-      Effect.flatMap((account) =>
-        makeDbInsertPlayer({
-          puuid: account.data.puuid,
-          name: v.name,
-          tag: v.tag,
-          discord_user_id: v.discord_user_id,
-        }),
-      ),
-    ),
-  ),
-  Effect.map(() => HttpServerResponse.empty({ status: 201 })),
-  Effect.catchTags({
-    RequestError: (c) => HttpServerResponse.json({ message: c.message }, { status: 400 }),
-  }),
-);
-
-const makeDbRemovePlayer = (name: string, tag: string) =>
-  D1Client.D1Client.pipe(
-    Effect.flatMap(
-      (s) => s<Schema.Void>`DELETE FROM players WHERE name = ${s(name)} AND tag = ${s(tag)}`,
-    ),
-  );
-
-export const removePlayer = HttpServerRequest.schemaBodyJson(RemovePlayerSchema).pipe(
-  Effect.flatMap((v) => makeDbRemovePlayer(v.name, v.tag)),
-  Effect.map(() => HttpServerResponse.empty({ status: 201 })),
-  Effect.catchTags({
-    ParseError: (c) => HttpServerResponse.json({ message: c.message }, { status: 400 }),
-  }),
 );
 
 const makeFetchMMRHistoryV2 = (player: Player) =>

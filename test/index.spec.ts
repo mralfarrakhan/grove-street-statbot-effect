@@ -15,6 +15,16 @@ import {
 import { AccountV2, MMRHistoryV2 } from '../src/schemas';
 import { KVClient } from '../src/services';
 import { HttpClient } from '@effect/platform';
+import { verifyDiscordSignature } from '../src/discord/verify';
+import {
+  formatProgressBar,
+  getTierColor,
+  hasAdminPermission,
+  InteractionType,
+  InteractionResponseType,
+} from '../src/discord/types';
+import { handleLinkCommand, handleListCommand, handleRankCommand } from '../src/discord/commands';
+import { D1Client } from '@effect/sql-d1';
 
 const IncomingRequest = Request<unknown, IncomingRequestCfProperties>;
 
@@ -29,8 +39,16 @@ describe('Grove Street Statbot Worker API', () => {
     expect(await response.text()).toBe('ok');
   });
 
-  it('GET /api/players returns 401 without Basic Auth', async () => {
-    const request = new IncomingRequest('http://example.com/api/players');
+  it('POST /interactions returns 401 without valid Ed25519 signature', async () => {
+    const request = new IncomingRequest('http://example.com/interactions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-signature-ed25519': '00'.repeat(64),
+        'x-signature-timestamp': `${Date.now()}`,
+      },
+      body: JSON.stringify({ type: 1 }),
+    });
     const ctx = createExecutionContext();
     const response = await worker.fetch(request, env, ctx);
     await waitOnExecutionContext(ctx);
@@ -399,5 +417,150 @@ describe('Milestone & Rank Change Resolution', () => {
       expect(result.won).toBe(true);
       expect(result.score).toBe(5800);
     }
+  });
+});
+
+describe('Discord Embed & Permission Utilities', () => {
+  it('formats progress bar accurately', () => {
+    const bar64 = formatProgressBar(64, 100);
+    expect(bar64).toContain('64/100 RR');
+    expect(bar64).toContain('█');
+    expect(bar64).toContain('░');
+
+    const bar0 = formatProgressBar(0, 100);
+    expect(bar0).toBe('[░░░░░░░░░░] 0/100 RR');
+
+    const bar100 = formatProgressBar(100, 100);
+    expect(bar100).toBe('[██████████] 100/100 RR');
+  });
+
+  it('maps tier names to characteristic colors', () => {
+    expect(getTierColor('Diamond 2')).toBe(0xb977d6);
+    expect(getTierColor('Ascendant 1')).toBe(0x48a66d);
+    expect(getTierColor('Gold 3')).toBe(0xe2b338);
+    expect(getTierColor('Immortal 3')).toBe(0xc83c5b);
+  });
+
+  it('detects administrator and manage server permissions', () => {
+    const adminBit = (1n << 3n).toString();
+    const manageGuildBit = (1n << 5n).toString();
+    const normalUserBit = '0';
+
+    expect(hasAdminPermission(adminBit)).toBe(true);
+    expect(hasAdminPermission(manageGuildBit)).toBe(true);
+    expect(hasAdminPermission(normalUserBit)).toBe(false);
+    expect(hasAdminPermission(undefined)).toBe(false);
+  });
+});
+
+describe('Discord Cryptography & Signature Verification', () => {
+  it('rejects missing or malformed signatures', async () => {
+    const valid = await verifyDiscordSignature('pubkey', 'sig', 'timestamp', 'body');
+    expect(valid).toBe(false);
+  });
+
+  it('generates a valid Ed25519 signature and verifies successfully', async () => {
+    let keyPair: CryptoKeyPair;
+    try {
+      keyPair = await crypto.subtle.generateKey(
+        { name: 'NODE-ED25519', namedCurve: 'NODE-ED25519' },
+        true,
+        ['sign', 'verify'],
+      );
+    } catch {
+      keyPair = await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify']);
+    }
+
+    const exportedRaw = await crypto.subtle.exportKey('raw', keyPair.publicKey);
+    const pubKeyHex = Array.from(new Uint8Array(exportedRaw))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+
+    const timestamp = '1710000000';
+    const body = JSON.stringify({ type: 1 });
+    const message = new TextEncoder().encode(timestamp + body);
+
+    const sigArrayBuffer = await crypto.subtle.sign(
+      keyPair.privateKey.algorithm.name,
+      keyPair.privateKey,
+      message,
+    );
+    const sigHex = Array.from(new Uint8Array(sigArrayBuffer))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+
+    const verified = await verifyDiscordSignature(pubKeyHex, sigHex, timestamp, body);
+    expect(verified).toBe(true);
+
+    const tampered = await verifyDiscordSignature(pubKeyHex, sigHex, timestamp, 'tampered');
+    expect(tampered).toBe(false);
+  });
+});
+
+describe('Discord Slash Command Handlers', () => {
+  const dummyD1 = Layer.succeed(D1Client.D1Client, ((query: unknown, ...args: unknown[]) => {
+    return Effect.succeed([
+      { puuid: 'p1', name: 'PlayerOne', tag: '1234', discord_user_id: '111' },
+      { puuid: 'p2', name: 'PlayerTwo', tag: '5678', discord_user_id: null },
+    ]);
+  }) as unknown as D1Client.D1Client);
+
+  it('handleListCommand returns roster embed with members', async () => {
+    const response = await Effect.runPromise(handleListCommand().pipe(Effect.provide(dummyD1)));
+    expect(response.type).toBe(InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE);
+    expect(response.data?.embeds?.[0]?.title).toContain('Grove Street Tracked Roster');
+    expect(response.data?.embeds?.[0]?.description).toContain('PlayerOne#1234');
+    expect(response.data?.embeds?.[0]?.description).toContain('<@111>');
+    expect(response.data?.embeds?.[0]?.description).toContain('*Unlinked*');
+  });
+
+  it('handleLinkCommand returns guidance on missing hash separator', async () => {
+    const dummyHttp = Layer.succeed(HttpClient.HttpClient, {} as unknown as HttpClient.HttpClient);
+
+    const interaction = {
+      id: 'i1',
+      type: InteractionType.APPLICATION_COMMAND,
+      token: 'tok',
+      user: { id: '999', username: 'TestUser' },
+      data: {
+        id: 'c1',
+        name: 'link',
+        options: [{ name: 'riot_id', type: 3, value: 'InvalidRiotIdWithoutTag' }],
+      },
+    };
+
+    const response = await Effect.runPromise(
+      handleLinkCommand(interaction).pipe(Effect.provide(Layer.merge(dummyD1, dummyHttp))),
+    );
+
+    expect(response.data?.content).toContain('Name#Tag');
+  });
+
+  it('handleRankCommand returns linking guidance for unlinked caller without options', async () => {
+    const emptyD1 = Layer.succeed(D1Client.D1Client, (() =>
+      Effect.succeed([])) as unknown as D1Client.D1Client);
+    const dummyHttp = Layer.succeed(HttpClient.HttpClient, {} as unknown as HttpClient.HttpClient);
+    const dummyKV = Layer.succeed(KVClient, {
+      get: () => Effect.succeed(Option.none()),
+      set: () => Effect.void,
+      delete: () => Effect.void,
+    });
+
+    const interaction = {
+      id: 'i2',
+      type: InteractionType.APPLICATION_COMMAND,
+      token: 'tok',
+      user: { id: '999', username: 'UnlinkedUser' },
+      data: { id: 'c2', name: 'rank' },
+    };
+
+    const response = await Effect.runPromise(
+      handleRankCommand(interaction).pipe(
+        Effect.provide(Layer.mergeAll(emptyD1, dummyHttp, dummyKV)),
+      ),
+    );
+
+    expect(response.data?.content).toContain('Discord Account Not Linked');
+    expect(response.data?.content).toContain('/link riot_id: Name#Tag');
   });
 });

@@ -1,29 +1,16 @@
 import { FetchHttpClient, HttpApp, HttpRouter, HttpServerResponse } from '@effect/platform';
 import { Effect } from 'effect';
-import { AILive, D1Live, KVLive } from './services';
-import { makeBasicAuth } from './middlewares';
-import { getPlayers, insertPlayer, removePlayer, scheduled as runScheduled } from './handles';
-import { env } from 'cloudflare:workers';
+import { handleDiscordInteractions } from './discord/router';
+import { scheduled as runScheduled } from './handles';
 import { logStructuredError } from './logger';
+import { AILive, D1Live, KVLive } from './services';
 
-const playerRoute = HttpRouter.empty.pipe(
-  HttpRouter.put('/', insertPlayer),
-  HttpRouter.del('/', removePlayer),
-  HttpRouter.get('/', getPlayers),
-  HttpRouter.use(makeBasicAuth(env.ADMIN_USERNAME, env.ADMIN_PASSWORD)),
-);
-
-const api = HttpRouter.empty.pipe(
-  HttpRouter.mount('/players', playerRoute),
+const router = HttpRouter.empty.pipe(
+  HttpRouter.post('/interactions', handleDiscordInteractions),
+  HttpRouter.post('/api/interactions', handleDiscordInteractions),
+  HttpRouter.get('/api', HttpServerResponse.text('ok')),
   HttpRouter.get('/', HttpServerResponse.text('ok')),
-);
-
-const servo = HttpRouter.empty.pipe(
-  HttpRouter.mount('/api', api),
-  Effect.catchTags({
-    RouteNotFound: () => HttpServerResponse.text('Not Found', { status: 404 }),
-    Unauthorized: () => HttpServerResponse.empty({ status: 401 }),
-  }),
+  Effect.catchTag('RouteNotFound', () => HttpServerResponse.text('Not Found', { status: 404 })),
   Effect.catchAllCause((cause) =>
     logStructuredError('api_unhandled_failure', cause).pipe(
       Effect.zipRight(
@@ -37,7 +24,7 @@ const servo = HttpRouter.empty.pipe(
       ),
     ),
   ),
-  Effect.provide([D1Live, FetchHttpClient.layer]),
+  Effect.provide([D1Live, KVLive, FetchHttpClient.layer]),
   HttpApp.toWebHandler,
 );
 
@@ -47,7 +34,7 @@ const scheduled = runScheduled.pipe(
 );
 
 export default {
-  fetch: (request, _env, _ctx) => servo(request),
+  fetch: (request, _env, _ctx) => router(request),
   scheduled: async (_controller, _env, ctx) => {
     ctx.waitUntil(Effect.runPromise(scheduled));
   },

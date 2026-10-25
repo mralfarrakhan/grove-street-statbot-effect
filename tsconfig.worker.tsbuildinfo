@@ -1,1 +1,1 @@
-{"root":["./worker-configuration.d.ts","./src/handles.ts","./src/index.ts","./src/logger.ts","./src/match.ts","./src/middlewares.ts","./src/model.ts","./src/personas.ts","./src/prompts.ts","./src/schemas.ts","./src/services.ts"],"version":"6.0.3"}
+{"root":["./worker-configuration.d.ts","./src/handles.ts","./src/index.ts","./src/logger.ts","./src/match.ts","./src/model.ts","./src/personas.ts","./src/prompts.ts","./src/schemas.ts","./src/services.ts","./src/discord/commands.ts","./src/discord/router.ts","./src/discord/types.ts","./src/discord/verify.ts"],"version":"6.0.3"}
