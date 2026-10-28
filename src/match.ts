@@ -9,10 +9,13 @@ export interface PlayerMatchPerformance {
   readonly deaths: number;
   readonly assists: number;
   readonly score: number;
+  readonly isMatchMvp: boolean;
+  readonly isTeamMvp: boolean;
 }
 
 interface RawPlayer {
   readonly puuid?: string;
+  readonly team?: string;
   readonly character?: string;
   readonly stats?: {
     readonly kills?: number;
@@ -55,12 +58,26 @@ export const fetchPlayerMatchPerformance = (
           if (!player || !player.character) {
             return Option.none<PlayerMatchPerformance>();
           }
+
+          const playerScore = player.stats?.score ?? 0;
+          const maxScoreAll = Math.max(0, ...players.map((p) => p.stats?.score ?? 0));
+          const isMatchMvp = playerScore > 0 && playerScore >= maxScoreAll;
+
+          const playerTeam = player.team?.toLowerCase();
+          const teamPlayers = playerTeam
+            ? players.filter((p) => p.team?.toLowerCase() === playerTeam)
+            : [player];
+          const maxScoreTeam = Math.max(0, ...teamPlayers.map((p) => p.stats?.score ?? 0));
+          const isTeamMvp = playerScore > 0 && playerScore >= maxScoreTeam;
+
           return Option.some<PlayerMatchPerformance>({
             character: player.character,
             kills: player.stats?.kills ?? 0,
             deaths: player.stats?.deaths ?? 0,
             assists: player.stats?.assists ?? 0,
-            score: player.stats?.score ?? 0,
+            score: playerScore,
+            isMatchMvp,
+            isTeamMvp,
           });
         }),
       ),
@@ -89,7 +106,17 @@ export const fetchPlayerMatchPerformance = (
         maybeStr,
         Option.flatMap((str) => {
           try {
-            return Option.some(JSON.parse(str) as PlayerMatchPerformance);
+            const parsed = JSON.parse(str) as Partial<PlayerMatchPerformance>;
+            if (!parsed.character) return Option.none<PlayerMatchPerformance>();
+            return Option.some<PlayerMatchPerformance>({
+              character: parsed.character,
+              kills: parsed.kills ?? 0,
+              deaths: parsed.deaths ?? 0,
+              assists: parsed.assists ?? 0,
+              score: parsed.score ?? 0,
+              isMatchMvp: Boolean(parsed.isMatchMvp),
+              isTeamMvp: Boolean(parsed.isTeamMvp),
+            });
           } catch {
             return Option.none<PlayerMatchPerformance>();
           }

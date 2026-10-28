@@ -311,8 +311,7 @@ export const handleLastMatchCommand = (
 
           // Pick newest match by date across all accounts
           const sorted = [...valid].sort(
-            (a, b) =>
-              DateTime.toEpochMillis(b.latest.date) - DateTime.toEpochMillis(a.latest.date),
+            (a, b) => DateTime.toEpochMillis(b.latest.date) - DateTime.toEpochMillis(a.latest.date),
           );
           const newest = sorted[0]!;
           const p = newest.player;

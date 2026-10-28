@@ -62,6 +62,7 @@ export type Report = Data.TaggedEnum<{
     readonly matchId: string;
     readonly map: string;
     readonly lastChange: number;
+    readonly isMatchMvp?: boolean;
   };
 }>;
 

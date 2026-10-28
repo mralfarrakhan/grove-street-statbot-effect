@@ -140,7 +140,7 @@ export const makeGetLatestRankChange =
         const kills = pipe(
           maybePerf,
           Option.map((p) => p.kills),
-          Option.filter((k) => k >= 20),
+          Option.filter((k) => k >= 30),
           Option.getOrUndefined,
         );
 
@@ -224,7 +224,11 @@ export const makeGetLatestRankChange =
           });
         }
 
-        if (Option.isSome(maybePerf) && maybePerf.value.kills >= 20) {
+        if (
+          Option.isSome(maybePerf) &&
+          maybePerf.value.kills >= 30 &&
+          (maybePerf.value.isMatchMvp || maybePerf.value.isTeamMvp)
+        ) {
           const perf = maybePerf.value;
           return MonsterCarry({
             kills: perf.kills,
@@ -235,6 +239,7 @@ export const makeGetLatestRankChange =
             matchId: latest.match_id,
             map: latest.map.name,
             lastChange: latest.last_change,
+            isMatchMvp: perf.isMatchMvp,
           });
         }
 
@@ -401,7 +406,7 @@ const makeBuildReport = (p: Player) => (r: Report) =>
           lastChange,
           buildPrompt: (ctx) =>
             buildUpRankPartnerPrompt(ctx, oldRank, newRank, { streakCount, kills }),
-          fallback: `**${p.name}#${p.tag}** has been promoted to ${newRank}${streakCount && streakCount >= 3 ? ` (${streakCount}-game heater!)` : ''}${kills && kills >= 20 ? ` with ${kills} kills` : ''}! Well played on ${map}, <@${p.discord_user_id}>.`,
+          fallback: `**${p.name}#${p.tag}** has been promoted to ${newRank}${streakCount && streakCount >= 3 ? ` (${streakCount}-game heater!)` : ''}${kills && kills >= 30 ? ` with ${kills} kills` : ''}! Well played on ${map}, <@${p.discord_user_id}>.`,
         }),
       DownRank: ({ oldRank, newRank, matchId, map, lastChange, streakCount, kills }) =>
         buildMatchReport({
@@ -429,7 +434,7 @@ const makeBuildReport = (p: Player) => (r: Report) =>
           map,
           lastChange,
           buildPrompt: (ctx) => buildWinStreakPartnerPrompt(ctx, streakCount, kills),
-          fallback: `🔥 **${p.name}#${p.tag}** is on a ${streakCount}-game heater! Gained +${lastChange} RR on ${map}${kills && kills >= 20 ? ` with ${kills} kills` : ''}. Unstoppable, <@${p.discord_user_id}>!`,
+          fallback: `🔥 **${p.name}#${p.tag}** is on a ${streakCount}-game heater! Gained +${lastChange} RR on ${map}${kills && kills >= 30 ? ` with ${kills} kills` : ''}. Unstoppable, <@${p.discord_user_id}>!`,
         }),
       LossStreak: ({ streakCount, matchId, map, lastChange, kills }) =>
         buildMatchReport({
@@ -440,17 +445,19 @@ const makeBuildReport = (p: Player) => (r: Report) =>
           buildPrompt: (ctx) => buildLossStreakPartnerPrompt(ctx, streakCount, kills),
           fallback: `⚠️ **Tilt Alert**: **${p.name}#${p.tag}** has dropped ${streakCount} consecutive games (${lastChange} RR on ${map}). Take a breather and reset mental, <@${p.discord_user_id}>.`,
         }),
-      MonsterCarry: ({ kills, score, won, matchId, map, lastChange }) =>
-        buildMatchReport({
+      MonsterCarry: ({ kills, score, won, matchId, map, lastChange, isMatchMvp }) => {
+        const mvpTitle = isMatchMvp ? 'Match MVP' : 'Team MVP';
+        return buildMatchReport({
           p,
           matchId,
           map,
           lastChange,
-          buildPrompt: (ctx) => buildMonsterCarryPartnerPrompt(ctx, kills, won),
+          buildPrompt: (ctx) => buildMonsterCarryPartnerPrompt(ctx, kills, won, mvpTitle),
           fallback: won
-            ? `👑 **Monster Carry**: **${p.name}#${p.tag}** dropped ${kills} kills on ${map} (Score: ${score}) to secure the victory! Masterclass, <@${p.discord_user_id}>!`
-            : `💔 **1v9 Tragedy**: **${p.name}#${p.tag}** dropped ${kills} kills on ${map}, but the team couldn't close it out. Unlucky, <@${p.discord_user_id}>.`,
-        }),
+            ? `👑 **Monster Carry**: **${p.name}#${p.tag}** dropped ${kills} kills as ${mvpTitle} on ${map} (Score: ${score}) to secure the victory! Masterclass, <@${p.discord_user_id}>!`
+            : `💔 **1v9 Tragedy**: **${p.name}#${p.tag}** dropped ${kills} kills as ${mvpTitle} on ${map}, but the team couldn't close it out. Unlucky, <@${p.discord_user_id}>.`,
+        });
+      },
     }),
   );
 

@@ -20,7 +20,7 @@ export const buildUpRankPartnerPrompt = (
       ? ` while riding an active ${options.streakCount}-game heater (win streak)`
       : '';
   const carryNote =
-    options?.kills && options.kills >= 20
+    options?.kills && options.kills >= 30
       ? ` and dropping an unbelievable ${options.kills} kills to seal the promotion`
       : '';
 
@@ -54,7 +54,7 @@ export const buildDownRankPartnerPrompt = (
       ? ` marking a painful ${options.streakCount}-game losing skid`
       : '';
   const carryNote =
-    options?.kills && options.kills >= 20
+    options?.kills && options.kills >= 30
       ? ` even after ${ctx.player} dropped ${options.kills} kills in a heroic effort`
       : '';
 
@@ -127,7 +127,7 @@ export const buildWinStreakPartnerPrompt = (
         : 'a fiery 3-game win streak!';
 
   const carryNote =
-    kills !== undefined && kills >= 20
+    kills !== undefined && kills >= 30
       ? ` What makes it even crazier is you dropped a monstrous ${kills} kills on their heads this match!`
       : '';
 
@@ -163,7 +163,7 @@ export const buildLossStreakPartnerPrompt = (
         : `a tough 3-game loss streak (${ctx.lastChange} RR on ${ctx.map}). Give a compassionate tilt check, reminding them to take a deep breath, drink water, and reset their mental.`;
 
   const carryNote =
-    kills !== undefined && kills >= 20
+    kills !== undefined && kills >= 30
       ? ` Note that ${ctx.player} actually dropped ${kills} kills trying to carry, but the team still couldn't pull it together.`
       : '';
 
@@ -190,14 +190,15 @@ export const buildMonsterCarryPartnerPrompt = (
   ctx: PartnerPromptContext,
   kills: number,
   won: boolean,
+  mvpTitle: 'Match MVP' | 'Team MVP' = 'Match MVP',
 ) => {
   const outcomeContext = won
-    ? `You and player ${ctx.player} won on map ${ctx.map} (+${ctx.lastChange} RR), thanks to ${ctx.player} delivering a monstrous ${kills} kills hard carry performance!`
-    : `Player ${ctx.player} dropped a monstrous ${kills} kills on map ${ctx.map} (${ctx.lastChange} RR), fighting 1v9, but the rest of the squad couldn't keep up and you took a heartbreaking defeat.`;
+    ? `You and player ${ctx.player} won on map ${ctx.map} (+${ctx.lastChange} RR), thanks to ${ctx.player} delivering a monstrous ${kills} kills hard carry performance as the ${mvpTitle}!`
+    : `Player ${ctx.player} dropped a monstrous ${kills} kills as the ${mvpTitle} on map ${ctx.map} (${ctx.lastChange} RR), fighting 1v9, but the rest of the squad couldn't keep up and you took a heartbreaking defeat.`;
 
   const task = won
-    ? `Speak directly to ${ctx.player} praising their absolute godly 20+ bomb carry. Joke about how their back must hurt from carrying the entire team to victory.`
-    : `Speak directly to ${ctx.player} offering sympathetic frustration about their tragic 1v9 carry. Reassure them that they did everything humanly possible and their team let them down.`;
+    ? `Speak directly to ${ctx.player} praising their absolute godly 30+ bomb carry as ${mvpTitle}. Joke about how their back must hurt from carrying the entire team to victory.`
+    : `Speak directly to ${ctx.player} offering sympathetic frustration about their tragic 1v9 carry dropping 30+ kills as ${mvpTitle}. Reassure them that they did everything humanly possible and their team let them down.`;
 
   return `
 You are ${ctx.persona.displayName} from VALORANT.

@@ -224,9 +224,9 @@ describe('Escalating Partner Prompts', () => {
     expect(prompt3).toContain('3-game win streak');
     expect(prompt3).toContain('<@123456789>');
 
-    const prompt5 = buildWinStreakPartnerPrompt(dummyCtx, 5, 26);
+    const prompt5 = buildWinStreakPartnerPrompt(dummyCtx, 5, 32);
     expect(prompt5).toContain('5-game win streak');
-    expect(prompt5).toContain('26 kills');
+    expect(prompt5).toContain('32 kills');
   });
 
   it('generates escalating loss streak tilt alert prompts (3 vs 5+ losses)', () => {
@@ -235,41 +235,48 @@ describe('Escalating Partner Prompts', () => {
     expect(prompt3).toContain('3-game loss streak');
     expect(prompt3).toContain('compassionate tilt check');
 
-    const prompt5 = buildLossStreakPartnerPrompt(lossCtx, 5, 22);
+    const prompt5 = buildLossStreakPartnerPrompt(lossCtx, 5, 34);
     expect(prompt5).toContain('5-game losing skid');
     expect(prompt5).toContain('log off for the day');
-    expect(prompt5).toContain('22 kills');
+    expect(prompt5).toContain('34 kills');
   });
 
-  it('generates monster carry prompts for 20+ kills on win vs loss', () => {
-    const promptWin = buildMonsterCarryPartnerPrompt(dummyCtx, 28, true);
-    expect(promptWin).toContain('28 kills hard carry');
+  it('generates monster carry prompts for 30+ kills as MVP on win vs loss', () => {
+    const promptWin = buildMonsterCarryPartnerPrompt(dummyCtx, 34, true, 'Match MVP');
+    expect(promptWin).toContain('34 kills hard carry');
+    expect(promptWin).toContain('Match MVP');
     expect(promptWin).toContain('back must hurt');
 
-    const promptLoss = buildMonsterCarryPartnerPrompt({ ...dummyCtx, lastChange: -16 }, 24, false);
-    expect(promptLoss).toContain('24 kills');
+    const promptLoss = buildMonsterCarryPartnerPrompt(
+      { ...dummyCtx, lastChange: -16 },
+      31,
+      false,
+      'Team MVP',
+    );
+    expect(promptLoss).toContain('31 kills');
+    expect(promptLoss).toContain('Team MVP');
     expect(promptLoss).toContain('tragic 1v9 carry');
     expect(promptLoss).toContain('team let them down');
   });
 
-  it('weaves streak and 20+ kills into UpRank promotion prompt', () => {
+  it('weaves streak and 30+ kills into UpRank promotion prompt', () => {
     const prompt = buildUpRankPartnerPrompt(dummyCtx, 'Diamond 3', 'Ascendant 1', {
       streakCount: 4,
-      kills: 25,
+      kills: 35,
     });
     expect(prompt).toContain('Ascendant 1');
     expect(prompt).toContain('4-game heater');
-    expect(prompt).toContain('25 kills');
+    expect(prompt).toContain('35 kills');
   });
 
-  it('weaves losing skid and 20+ kills into DownRank demotion prompt', () => {
+  it('weaves losing skid and 30+ kills into DownRank demotion prompt', () => {
     const prompt = buildDownRankPartnerPrompt(dummyCtx, 'Ascendant 1', 'Diamond 3', {
       streakCount: 3,
-      kills: 22,
+      kills: 31,
     });
     expect(prompt).toContain('Diamond 3');
     expect(prompt).toContain('3-game losing skid');
-    expect(prompt).toContain('22 kills');
+    expect(prompt).toContain('31 kills');
   });
 });
 
@@ -343,7 +350,15 @@ describe('Milestone & Rank Change Resolution', () => {
       { matchId: 'm1', tierId: 15, tierName: 'Platinum 1', lastChange: 24 },
     ]);
 
-    const mockPerf = { character: 'Reyna', kills: 25, deaths: 10, assists: 3, score: 6500 };
+    const mockPerf = {
+      character: 'Reyna',
+      kills: 35,
+      deaths: 10,
+      assists: 3,
+      score: 6500,
+      isMatchMvp: true,
+      isTeamMvp: true,
+    };
 
     const result = await Effect.runPromise(
       makeGetLatestRankChange(mmr)(Option.some('m2')).pipe(
@@ -356,7 +371,7 @@ describe('Milestone & Rank Change Resolution', () => {
       expect(result.oldRank).toBe('Platinum 1');
       expect(result.newRank).toBe('Platinum 2');
       expect(result.streakCount).toBe(3);
-      expect(result.kills).toBe(25);
+      expect(result.kills).toBe(35);
     }
   });
 
@@ -404,13 +419,62 @@ describe('Milestone & Rank Change Resolution', () => {
     }
   });
 
-  it('returns MonsterCarry when tier did not change, no streak, but player dropped 22 kills', async () => {
+  it('returns NoChange when player dropped kills below 30 or is not MVP', async () => {
     const mmr = makeMockHistory([
       { matchId: 'm2', tierId: 15, tierName: 'Platinum 1', lastChange: 20 },
       { matchId: 'm1', tierId: 15, tierName: 'Platinum 1', lastChange: -18 },
     ]);
 
-    const mockPerf = { character: 'Jett', kills: 22, deaths: 14, assists: 6, score: 5800 };
+    // Case 1: 28 kills (below 30) even as Match MVP
+    const perfLowKills = {
+      character: 'Jett',
+      kills: 28,
+      deaths: 14,
+      assists: 6,
+      score: 5800,
+      isMatchMvp: true,
+      isTeamMvp: true,
+    };
+    const resLowKills = await Effect.runPromise(
+      makeGetLatestRankChange(mmr)(Option.some('m1')).pipe(
+        Effect.provide(Layer.merge(createMockKV(perfLowKills), dummyHttp)),
+      ),
+    );
+    expect(resLowKills._tag).toBe('NoChange');
+
+    // Case 2: 32 kills (>=30) but neither Match MVP nor Team MVP
+    const perfNotMvp = {
+      character: 'Jett',
+      kills: 32,
+      deaths: 14,
+      assists: 6,
+      score: 5800,
+      isMatchMvp: false,
+      isTeamMvp: false,
+    };
+    const resNotMvp = await Effect.runPromise(
+      makeGetLatestRankChange(mmr)(Option.some('m1')).pipe(
+        Effect.provide(Layer.merge(createMockKV(perfNotMvp), dummyHttp)),
+      ),
+    );
+    expect(resNotMvp._tag).toBe('NoChange');
+  });
+
+  it('returns MonsterCarry when player dropped >= 30 kills as Match MVP on win', async () => {
+    const mmr = makeMockHistory([
+      { matchId: 'm2', tierId: 15, tierName: 'Platinum 1', lastChange: 20 },
+      { matchId: 'm1', tierId: 15, tierName: 'Platinum 1', lastChange: -18 },
+    ]);
+
+    const mockPerf = {
+      character: 'Jett',
+      kills: 34,
+      deaths: 14,
+      assists: 6,
+      score: 6200,
+      isMatchMvp: true,
+      isTeamMvp: true,
+    };
 
     const result = await Effect.runPromise(
       makeGetLatestRankChange(mmr)(Option.some('m1')).pipe(
@@ -420,9 +484,41 @@ describe('Milestone & Rank Change Resolution', () => {
 
     expect(result._tag).toBe('MonsterCarry');
     if (result._tag === 'MonsterCarry') {
-      expect(result.kills).toBe(22);
+      expect(result.kills).toBe(34);
       expect(result.won).toBe(true);
-      expect(result.score).toBe(5800);
+      expect(result.score).toBe(6200);
+      expect(result.isMatchMvp).toBe(true);
+    }
+  });
+
+  it('returns MonsterCarry (1v9 Tragedy) when player dropped >= 30 kills as Team MVP on loss', async () => {
+    const mmr = makeMockHistory([
+      { matchId: 'm2', tierId: 15, tierName: 'Platinum 1', lastChange: -16 },
+      { matchId: 'm1', tierId: 15, tierName: 'Platinum 1', lastChange: 18 },
+    ]);
+
+    const mockPerf = {
+      character: 'Reyna',
+      kills: 31,
+      deaths: 18,
+      assists: 4,
+      score: 5900,
+      isMatchMvp: false,
+      isTeamMvp: true,
+    };
+
+    const result = await Effect.runPromise(
+      makeGetLatestRankChange(mmr)(Option.some('m1')).pipe(
+        Effect.provide(Layer.merge(createMockKV(mockPerf), dummyHttp)),
+      ),
+    );
+
+    expect(result._tag).toBe('MonsterCarry');
+    if (result._tag === 'MonsterCarry') {
+      expect(result.kills).toBe(31);
+      expect(result.won).toBe(false);
+      expect(result.score).toBe(5900);
+      expect(result.isMatchMvp).toBe(false);
     }
   });
 });
